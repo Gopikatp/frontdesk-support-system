@@ -16,6 +16,7 @@ Frontdesk is a support-ticket workspace for Arvo Systems. It replaces spreadshee
 - Atomic ticket claiming so only one agent can claim an unassigned ticket.
 - Public replies and private team notes, kept distinct in the messages API and omitted from CSV exports.
 - Email/password sign-in with salted PBKDF2 password hashes, expiring opaque bearer sessions, logout, and session revocation.
+- Separate `/admin/login` and `/staff/login` portals, with the selected account role checked by the backend.
 - Repeated failed sign-ins are throttled; accounts can change passwords and administrators can reset passwords or disable accounts.
 - Admin-managed accounts, roles, account disabling, and password resets; no public registration.
 - Server-derived audit actors, so request bodies cannot impersonate agents.
@@ -60,7 +61,12 @@ Frontdesk is a support-ticket workspace for Arvo Systems. It replaces spreadshee
    uvicorn backend.main:app --reload
    ```
    Or use the compatibility command `uvicorn main:app --reload`.
-5. Open:
+5. Sign in:
+   - Administrator: http://127.0.0.1:8000/admin/login
+   - Staff: http://127.0.0.1:8000/staff/login
+   - The root URL shows both sign-in choices.
+   The initial administrator signs in at the admin URL and creates a separate `AGENT` account for each staff member. Give each person their own staff email and initial password through a private channel; do not share the administrator credentials.
+6. Open:
    - App: http://127.0.0.1:8000
    - API docs: http://127.0.0.1:8000/docs
    - Health check: http://127.0.0.1:8000/api/health
@@ -90,6 +96,8 @@ python -m unittest discover -s tests
 - `GET/POST /api/users` — administrator-only account management
 - `PATCH /api/users/{id}` and `POST /api/users/{id}/password` — administrator-only account disable/enable and password reset
 
+The login request includes a `role` of `ADMIN` or `AGENT` (omitting it defaults to `AGENT`). The server rejects credentials whose account role does not match the selected portal. Account-management routes remain administrator-only regardless of which URL is used. When hosting the frontend separately, configure the static host to serve `index.html` for `/admin/login` and `/staff/login` as well.
+
 ## Business rules and production limitations
 
 - Working hours are Monday-Friday, 09:30-18:30 in `APP_TIMEZONE` (defaults to `Asia/Kolkata`). Add official festival days to `HOLIDAYS` in `backend/main.py`.
@@ -97,5 +105,6 @@ python -m unittest discover -s tests
 - When priority changes, new SLA targets begin at the change time; the priority change is recorded in the audit history.
 - User accounts improve access control, but this project is still a portfolio/demo, not production-ready. Before real customer data, add a formal database migration workflow, MFA or an identity provider, password recovery, monitoring/backups, and database-enforced audit immutability.
 - On the first deployment, Render prompts for `ADMIN_EMAIL` and `ADMIN_PASSWORD` (minimum 12 characters). The initial administrator is created once; retain the credentials securely. Later changes to those environment variables do not reset the stored password.
+- Share the deployed `/staff/login` URL with staff. The administrator signs in at `/admin/login`, creates a separate `AGENT` account for each person, and shares each person's sign-in details privately. Never give staff the administrator password.
 - This is an agent-only dashboard: every ticket/API operation requires an active agent session, and only administrators can manage accounts. It is not a customer portal; a customer-facing API must always force public-only messages server-side and enforce customer ownership.
 - Audit entries are append-only through the application routes. Database permissions or triggers are required to make them immutable against direct database access.
