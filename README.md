@@ -99,7 +99,6 @@ Never commit `.env` or send it to evaluators. Set deployment secrets through the
 
 ## Important limitations
 
-- This is a hiring-test and portfolio application, not a production-ready service for sensitive customer data.
 - Customer email addresses are not verified. Email verification, password recovery, MFA, monitoring, backups, and a formal database migration workflow are not implemented.
 - Audit triggers protect records from ordinary database updates and deletions, but a database owner or superuser can disable or remove those triggers. Restrict database access appropriately.
 - Newly registered customers do not automatically gain access to older tickets with a matching email address; this avoids exposing tickets without verified ownership.
@@ -110,4 +109,4 @@ Never commit `.env` or send it to evaluators. Set deployment secrets through the
 
 **Not completed:** Production hardening such as customer email verification, password recovery, MFA, formal migrations, monitoring, and backups was outside the time-boxed implementation. The application should be treated as a demo and not used for sensitive customer data.
 
-For submission, provide the verified live URL, repository URL, this README, and the short handoff note above. Keep the app available for the requested evaluation period.
+
