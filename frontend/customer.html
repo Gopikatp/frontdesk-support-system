@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Frontdesk | Customer Support</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <section id="authScreen" class="auth-screen">
+    <div class="auth-card">
+      <div class="brand"><span class="brand-mark">F</span><div><strong>Frontdesk</strong><small>ARVO SYSTEMS · CUSTOMER SUPPORT</small></div></div>
+      <div id="signInPanel">
+        <h1>Customer sign in</h1>
+        <p class="muted">Sign in to create a support request and follow your tickets.</p>
+        <p id="signInError" class="auth-error" role="alert" hidden></p>
+        <p id="signInSuccess" class="auth-success" role="status" hidden></p>
+        <form id="signInForm">
+          <label>Email<input name="email" type="email" autocomplete="username" required maxlength="254"></label>
+          <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
+          <button class="primary full" type="submit">Sign in</button>
+        </form>
+        <p class="auth-switch">New here? <button id="showRegister" class="text-button" type="button">Create a customer account</button></p>
+      </div>
+      <div id="registerPanel" hidden>
+        <h1>Create an account</h1>
+        <p class="muted">Register as a customer. No administrator approval is needed.</p>
+        <p id="registerError" class="auth-error" role="alert" hidden></p>
+        <form id="registerForm">
+          <label>Your name<input name="display_name" autocomplete="name" required maxlength="120"></label>
+          <label>Email<input name="email" type="email" autocomplete="email" required maxlength="254"></label>
+          <label>Password <span class="field-hint">(at least 12 characters)</span><input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
+          <button class="primary full" type="submit">Create customer account</button>
+        </form>
+        <p class="auth-switch">Already registered? <button id="showSignIn" class="text-button" type="button">Sign in</button></p>
+      </div>
+    </div>
+  </section>
+  <div id="customerApp" hidden>
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">F</span><div><strong>Frontdesk</strong><small>ARVO SYSTEMS · CUSTOMER SUPPORT</small></div></div>
+      <div class="agent"><span id="customerName"></span><button class="secondary" id="customerLogout">Sign out</button></div>
+    </header>
+    <main class="shell">
+      <section class="intro">
+        <div><p class="eyebrow">CUSTOMER PORTAL</p><h1>Your support requests</h1><p class="muted">Create a ticket and follow replies from our support team.</p></div>
+        <button class="primary" id="newCustomerTicket">＋ New request</button>
+      </section>
+      <div class="ticket-layout customer-layout">
+        <section><h2 class="section-title">Your tickets</h2><div id="customerTicketList" class="ticket-list"></div></section>
+        <section id="customerDetail" class="detail empty"><div class="empty-icon">▤</div><h3>Select a request</h3><p>Your support conversation will appear here.</p></section>
+      </div>
+    </main>
+    <dialog id="customerTicketDialog">
+      <form id="customerTicketForm">
+        <div class="dialog-head"><div><p class="eyebrow">CUSTOMER SUPPORT</p><h2>New support request</h2></div><button type="button" class="close" id="closeCustomerTicketDialog">×</button></div>
+        <label>What do you need help with?<input name="title" required minlength="3" maxlength="180" placeholder="Briefly describe the issue"></label>
+        <label>Details<textarea name="description" rows="5" required maxlength="10000" placeholder="Include the details our team needs to help"></textarea></label>
+        <button class="primary full" type="submit">Submit request</button>
+      </form>
+    </dialog>
+  </div>
+  <script>window.FRONTDESK_API_BASE = "";</script>
+  <script src="/static/customer.js"></script>
+</body>
+</html>
