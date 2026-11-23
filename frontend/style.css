@@ -10,6 +10,13 @@
 @media(max-width:480px){.filters input{width:100%;flex-basis:100%}.compose-row{align-items:flex-start}}
 .auth-screen{min-height:100vh;display:grid;place-items:center;padding:24px}
 .auth-card{width:min(420px,100%);background:#fff;border:1px solid #e8edf4;border-radius:16px;padding:30px;box-shadow:0 12px 40px #17203312}
+.portal-card{width:min(520px,100%)}
+.portal-options{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:24px}
+.portal-option{display:block;padding:18px;border:1px solid #e3e8ef;border-radius:11px;color:#172033;text-decoration:none}
+.portal-option:hover{border-color:#155eef;background:#f7f9ff}
+.portal-option strong,.portal-option span{display:block}
+.portal-option span{font-size:12px;color:#8490a3;line-height:1.5;margin-top:7px}
+.login-switch{display:block;text-align:center;margin-top:18px;font-size:12px;color:#155eef;text-decoration:none}
 .auth-card h1{font:800 25px Manrope;margin:28px 0 0}
 .auth-card .muted{line-height:1.55}
 .auth-card label{display:block;font-size:12px;font-weight:700;color:#475467;margin:16px 0}
@@ -22,5 +29,5 @@
 .user-row strong,.user-row small{display:block;overflow-wrap:anywhere}
 .user-row small{color:#7b8798;font-size:10px;margin-top:3px}
 .user-row button{font-size:10px;padding:6px 8px}
-#appScreen[hidden],#loginScreen[hidden]{display:none}
-@media(max-width:480px){.auth-card{padding:22px}.agent{gap:7px}.agent #currentUser{font-size:11px}}
+#appScreen[hidden],#loginScreen[hidden],#portalScreen[hidden]{display:none}
+@media(max-width:480px){.auth-card{padding:22px}.portal-options{grid-template-columns:1fr}.agent{gap:7px}.agent #currentUser{font-size:11px}}

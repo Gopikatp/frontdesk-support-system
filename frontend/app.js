@@ -1,5 +1,8 @@
 const $ = (id) => document.getElementById(id);
 const API_BASE = (window.FRONTDESK_API_BASE || "").replace(/\/$/, "");
+const portalRole = window.location.pathname === "/admin/login"
+  ? "ADMIN"
+  : window.location.pathname === "/staff/login" ? "AGENT" : null;
 let tickets = [];
 let selectedId = null;
 let authToken = sessionStorage.getItem("frontdesk_token");
@@ -33,8 +36,16 @@ async function api(path, options = {}) {
 }
 
 function showLogin(message = "") {
-  $("loginScreen").hidden = false;
+  $("portalScreen").hidden = Boolean(portalRole);
+  $("loginScreen").hidden = !portalRole;
   $("appScreen").hidden = true;
+  if (portalRole) {
+    const portalName = portalRole === "ADMIN" ? "Admin" : "Staff";
+    $("loginTitle").textContent = `${portalName} sign in`;
+    $("loginDescription").textContent = portalRole === "ADMIN"
+      ? "Sign in with your administrator account to manage staff accounts and support operations."
+      : "Sign in with the staff account provided to you by your administrator.";
+  }
   $("loginError").textContent = message;
   $("loginError").hidden = !message;
 }
@@ -338,7 +349,10 @@ $("loginForm").onsubmit = async (event) => {
   $("loginError").hidden = true;
   const form = Object.fromEntries(new FormData(event.target));
   try {
-    const result = await api("/api/auth/login", { method: "POST", body: JSON.stringify(form) });
+    const result = await api("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ ...form, role: portalRole }),
+    });
     authToken = result.access_token;
     sessionStorage.setItem("frontdesk_token", authToken);
     event.target.reset();
@@ -379,6 +393,11 @@ async function startApp() {
   }
   try {
     const user = await api("/api/auth/me");
+    if (portalRole && user.role !== portalRole) {
+      await api("/api/auth/logout", { method: "POST" });
+      expireSession("This account cannot use the selected sign-in. Choose the correct sign-in type.");
+      return;
+    }
     showApp(user);
     await load();
   } catch (error) {
