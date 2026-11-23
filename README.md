@@ -81,9 +81,6 @@ The tests cover authentication and authorization, customer data isolation, ticke
 
 The repository includes a Render Blueprint in [`render.yaml`](./render.yaml). To deploy, push the repository to GitHub, create a Blueprint in Render from that repository, and provide `ADMIN_EMAIL` and a unique `ADMIN_PASSWORD` when prompted. The Blueprint describes a web service and PostgreSQL database. After deployment, verify `/api/health` and test the customer, staff, and administrator flows.
 
-The deployment URL is assigned by the hosting provider; this repository does not claim a live URL. Add the URL to your submission only after deployment and browser testing succeed. Free-tier availability, limits, and database retention are controlled by the hosting provider and may change; confirm the current terms and keep the service available for the evaluation period.
-
-Never commit `.env` or send it to evaluators. Set deployment secrets through the hosting provider’s environment-variable configuration.
 
 ## Configuration
 
