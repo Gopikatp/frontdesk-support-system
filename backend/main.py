@@ -113,8 +113,14 @@ class AuditEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     ticket: Mapped[Ticket] = relationship(back_populates="audit_events")
 
-# Working calendar: Monday-Friday, 09:30-18:30. Add company festival dates here.
-HOLIDAYS: set[date] = set()
+def parse_holidays(value: str) -> set[date]:
+    try:
+        return {date.fromisoformat(item.strip()) for item in value.split(",") if item.strip()}
+    except ValueError as exc:
+        raise ValueError("HOLIDAYS must be comma-separated dates in YYYY-MM-DD format") from exc
+
+# Working calendar: Monday-Friday, 09:30-18:30. Set company festival dates in HOLIDAYS.
+HOLIDAYS = parse_holidays(os.getenv("HOLIDAYS", ""))
 OPEN = time(9, 30)
 CLOSE = time(18, 30)
 PRIORITY_TARGETS = {
@@ -916,6 +922,44 @@ def ensure_customer_ticket_ownership_column(database_engine=engine) -> None:
             "ON tickets (customer_account_id)"
         )
 
+def ensure_audit_immutability(database_engine=engine) -> None:
+    dialect = database_engine.dialect.name
+    with database_engine.begin() as connection:
+        if dialect == "sqlite":
+            connection.exec_driver_sql(
+                "CREATE TRIGGER IF NOT EXISTS audit_events_no_update "
+                "BEFORE UPDATE ON audit_events "
+                "BEGIN SELECT RAISE(ABORT, 'audit_events are immutable'); END"
+            )
+            connection.exec_driver_sql(
+                "CREATE TRIGGER IF NOT EXISTS audit_events_no_delete "
+                "BEFORE DELETE ON audit_events "
+                "BEGIN SELECT RAISE(ABORT, 'audit_events are immutable'); END"
+            )
+        elif dialect == "postgresql":
+            connection.exec_driver_sql(
+                "CREATE OR REPLACE FUNCTION frontdesk_prevent_audit_mutation() "
+                "RETURNS trigger LANGUAGE plpgsql AS $$ "
+                "BEGIN RAISE EXCEPTION 'audit_events are immutable'; END; $$"
+            )
+            connection.exec_driver_sql("DROP TRIGGER IF EXISTS audit_events_no_update ON audit_events")
+            connection.exec_driver_sql("DROP TRIGGER IF EXISTS audit_events_no_delete ON audit_events")
+            connection.exec_driver_sql("DROP TRIGGER IF EXISTS audit_events_no_truncate ON audit_events")
+            connection.exec_driver_sql(
+                "CREATE TRIGGER audit_events_no_update BEFORE UPDATE ON audit_events "
+                "FOR EACH ROW EXECUTE FUNCTION frontdesk_prevent_audit_mutation()"
+            )
+            connection.exec_driver_sql(
+                "CREATE TRIGGER audit_events_no_delete BEFORE DELETE ON audit_events "
+                "FOR EACH ROW EXECUTE FUNCTION frontdesk_prevent_audit_mutation()"
+            )
+            connection.exec_driver_sql(
+                "CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON audit_events "
+                "FOR EACH STATEMENT EXECUTE FUNCTION frontdesk_prevent_audit_mutation()"
+            )
+        else:
+            raise RuntimeError(f"Audit immutability is not configured for database dialect: {dialect}")
+
 def migrate_legacy_ticket_owners(db: Session, admin: Account) -> None:
     active_names = set(db.scalars(
         select(Account.display_name).where(
@@ -961,24 +1005,33 @@ def ensure_initial_admin():
         logger.info("Created initial administrator account %s", account.email)
         migrate_legacy_ticket_owners(db, account)
 
+def auto_close_stale_waiting_tickets(db: Session, now: datetime) -> int:
+    waiting = db.scalars(select(Ticket).where(Ticket.status == "WAITING_CUSTOMER")).all()
+    closed_count = 0
+    for ticket in waiting:
+        if not ticket.waiting_since:
+            continue
+        paused_seconds = working_seconds_between(ticket.waiting_since, now)
+        if paused_seconds < 5 * 9 * 3600:
+            continue
+        paused_hours = paused_seconds / 3600
+        ticket.first_response_due_at = add_working_hours(ticket.first_response_due_at, paused_hours)
+        ticket.resolution_due_at = add_working_hours(ticket.resolution_due_at, paused_hours)
+        ticket.status = "CLOSED"
+        ticket.resolved_at = now
+        ticket.waiting_since = None
+        ticket.updated_at = now
+        audit(db, ticket.id, "SYSTEM", "AUTO_CLOSED", "No customer response for five working days")
+        closed_count += 1
+    db.commit()
+    return closed_count
+
 async def auto_close_waiting_tickets():
     # Check every 15 minutes. Close after 5 working days of customer inactivity.
     while True:
         try:
             with SessionLocal() as db:
-                now = utcnow()
-                waiting = db.scalars(select(Ticket).where(Ticket.status == "WAITING_CUSTOMER")).all()
-                for t in waiting:
-                    if t.waiting_since and working_seconds_between(t.waiting_since, now) >= 5 * 9 * 3600:
-                        paused = working_seconds_between(t.waiting_since, now) / 3600
-                        t.first_response_due_at = add_working_hours(t.first_response_due_at, paused)
-                        t.resolution_due_at = add_working_hours(t.resolution_due_at, paused)
-                        t.status = "CLOSED"
-                        t.resolved_at = now
-                        t.waiting_since = None
-                        t.updated_at = now
-                        audit(db, t.id, "SYSTEM", "AUTO_CLOSED", "No customer response for five working days")
-                db.commit()
+                auto_close_stale_waiting_tickets(db, utcnow())
         except Exception:
             logger.exception("Auto-close task failed")
         await asyncio.sleep(900)
@@ -987,6 +1040,7 @@ async def auto_close_waiting_tickets():
 async def startup_task():
     Base.metadata.create_all(bind=engine)
     ensure_customer_ticket_ownership_column()
+    ensure_audit_immutability()
     ensure_initial_admin()
     app.state.auto_close_task = asyncio.create_task(auto_close_waiting_tickets())
 
