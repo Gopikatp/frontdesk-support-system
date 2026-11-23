@@ -10,6 +10,17 @@ from backend import main
 
 
 class BackendTests(unittest.TestCase):
+    def test_postgres_urls_select_installed_psycopg_driver(self):
+        self.assertEqual(
+            main.normalize_database_url("postgres://user:pass@db.example/app"),
+            "postgresql+psycopg://user:pass@db.example/app",
+        )
+        self.assertEqual(
+            main.normalize_database_url("postgresql://user:pass@db.example/app"),
+            "postgresql+psycopg://user:pass@db.example/app",
+        )
+        self.assertEqual(main.normalize_database_url("sqlite:///app.db"), "sqlite:///app.db")
+
     def setUp(self):
         self.engine = create_engine(
             "sqlite://",

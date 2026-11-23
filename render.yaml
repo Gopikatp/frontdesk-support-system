@@ -3,6 +3,7 @@ services:
     name: frontdesk
     runtime: docker
     plan: free
+    healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL
         fromDatabase:
