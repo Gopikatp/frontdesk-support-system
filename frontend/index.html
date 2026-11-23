@@ -7,18 +7,7 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <section id="portalScreen" class="auth-screen" hidden>
-    <div class="auth-card portal-card">
-      <div class="brand"><span class="brand-mark">F</span><div><strong>Frontdesk</strong><small>ARVO SYSTEMS · SUPPORT OPERATIONS</small></div></div>
-      <h1>Welcome to Frontdesk</h1>
-      <p class="muted">Choose your sign-in to continue. Administrators should create a separate staff account for each team member.</p>
-      <div class="portal-options">
-        <a class="portal-option" href="/admin/login"><strong>Admin sign in</strong><span>Manage staff accounts and support operations.</span></a>
-        <a class="portal-option" href="/staff/login"><strong>Staff sign in</strong><span>Access the support inbox with your staff account.</span></a>
-      </div>
-    </div>
-  </section>
-  <section id="loginScreen" class="auth-screen" hidden>
+  <section id="loginScreen" class="auth-screen">
     <form id="loginForm" class="auth-card">
       <div class="brand"><span class="brand-mark">F</span><div><strong>Frontdesk</strong><small>ARVO SYSTEMS · SUPPORT OPERATIONS</small></div></div>
       <h1 id="loginTitle">Sign in</h1>
@@ -27,7 +16,6 @@
       <label>Email<input name="email" type="email" autocomplete="username" required maxlength="254"></label>
       <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
       <button class="primary full" type="submit">Sign in</button>
-      <a class="login-switch" href="/">Back to sign-in options</a>
     </form>
   </section>
   <div id="appScreen" hidden>

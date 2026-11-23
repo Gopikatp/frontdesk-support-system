@@ -1,8 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const API_BASE = (window.FRONTDESK_API_BASE || "").replace(/\/$/, "");
-const portalRole = window.location.pathname === "/admin/login"
-  ? "ADMIN"
-  : window.location.pathname === "/staff/login" ? "AGENT" : null;
+const portalRole = window.location.pathname === "/admin/login" ? "ADMIN" : "AGENT";
 let tickets = [];
 let selectedId = null;
 let authToken = sessionStorage.getItem("frontdesk_token");
@@ -36,16 +34,13 @@ async function api(path, options = {}) {
 }
 
 function showLogin(message = "") {
-  $("portalScreen").hidden = Boolean(portalRole);
-  $("loginScreen").hidden = !portalRole;
+  $("loginScreen").hidden = false;
   $("appScreen").hidden = true;
-  if (portalRole) {
-    const portalName = portalRole === "ADMIN" ? "Admin" : "Staff";
-    $("loginTitle").textContent = `${portalName} sign in`;
-    $("loginDescription").textContent = portalRole === "ADMIN"
-      ? "Sign in with your administrator account to manage staff accounts and support operations."
-      : "Sign in with the staff account provided to you by your administrator.";
-  }
+  const isAdmin = portalRole === "ADMIN";
+  $("loginTitle").textContent = isAdmin ? "Admin sign in" : "Staff sign in";
+  $("loginDescription").textContent = isAdmin
+    ? "Sign in with your administrator account to manage staff accounts and support operations."
+    : "Sign in with the staff account provided to you by your administrator.";
   $("loginError").textContent = message;
   $("loginError").hidden = !message;
 }
