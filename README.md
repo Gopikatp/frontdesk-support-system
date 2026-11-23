@@ -17,8 +17,9 @@ Frontdesk is a support-ticket workspace for Arvo Systems. It replaces spreadshee
 - Public replies and private team notes, kept distinct in the messages API and omitted from CSV exports.
 - Email/password sign-in with salted PBKDF2 password hashes, expiring opaque bearer sessions, logout, and session revocation.
 - Separate `/admin/login` and `/staff/login` portals, with the selected account role checked by the backend.
+- Public customer registration and a customer portal for creating requests, viewing only their own tickets, and sending public replies.
 - Repeated failed sign-ins are throttled; accounts can change passwords and administrators can reset passwords or disable accounts.
-- Admin-managed accounts, roles, account disabling, and password resets; no public registration.
+- Admin-managed staff accounts, roles, account disabling, password resets, and a view of registered customer accounts.
 - Server-derived audit actors, so request bodies cannot impersonate agents.
 - Security response headers and no-store API responses.
 - Business-hour SLA calculations (Monday-Friday, 09:30-18:30), with a configurable festival-holiday calendar.
@@ -29,6 +30,7 @@ Frontdesk is a support-ticket workspace for Arvo Systems. It replaces spreadshee
 - Append-only activity event creation for ticket operations.
 - Priority changes record the decision and calculate new targets from the change time.
 - On startup, active tickets assigned to names with no active account are transferred to the initial active administrator and recorded in the audit history.
+- Customer-created tickets are linked to the signed-in customer account, not just its email. Existing tickets remain staff-only rather than being exposed to someone who registers using a matching email address.
 - Tests cover database URLs, authentication and throttling, account access, ticket ownership and transfer, private-note handling, and waiting status.
 
 ## Technology
@@ -61,10 +63,11 @@ Frontdesk is a support-ticket workspace for Arvo Systems. It replaces spreadshee
    uvicorn backend.main:app --reload
    ```
    Or use the compatibility command `uvicorn main:app --reload`.
-5. Sign in:
-   - Staff: http://127.0.0.1:8000 (also available at `/staff/login`)
+5. Access the portals:
+   - Customers: http://127.0.0.1:8000 — customers can create an account themselves.
+   - Staff: http://127.0.0.1:8000/staff/login
    - Administrator: http://127.0.0.1:8000/admin/login
-   The initial administrator signs in at the admin URL and creates a separate `AGENT` account for each staff member. Give each person their own staff email and initial password through a private channel; do not share the administrator credentials.
+   Only the administrator should create internal staff (`AGENT`) accounts. Customers can self-register; public registration always creates a `CUSTOMER` account and never grants staff access. Do not share administrator credentials.
 6. Open:
    - App: http://127.0.0.1:8000
    - API docs: http://127.0.0.1:8000/docs
@@ -89,13 +92,14 @@ python -m unittest discover -s tests
 - `GET /api/tickets/{id}/audit` — activity history
 - `GET /api/health` — health check
 - `POST /api/auth/login` — sign in and create a session
+- `POST /api/auth/register` — create a customer-only account
 - `GET /api/auth/me` — current account
 - `POST /api/auth/logout` — revoke current session
 - `POST /api/auth/password` — change current password and revoke sessions
 - `GET/POST /api/users` — administrator-only account management
 - `PATCH /api/users/{id}` and `POST /api/users/{id}/password` — administrator-only account disable/enable and password reset
 
-The login request includes a `role` of `ADMIN` or `AGENT` (omitting it defaults to `AGENT`). The server rejects credentials whose account role does not match the selected portal. Account-management routes remain administrator-only regardless of which URL is used. The public root URL opens staff sign-in; administrators use `/admin/login`. When hosting the frontend separately, configure the static host to serve `index.html` for `/admin/login` and `/staff/login` as well.
+The login request includes a `role` of `ADMIN`, `AGENT`, or `CUSTOMER` (omitting it defaults to `AGENT`). The server rejects credentials whose account role does not match. Customers can only access tickets linked to their account ID, and the server always hides private notes and audit logs from them. Account-management routes remain administrator-only. When hosting the frontend separately, configure the static host to serve the customer page at `/` and `/customer/login`, and `index.html` at `/admin/login` and `/staff/login`.
 
 ## Business rules and production limitations
 
@@ -104,6 +108,7 @@ The login request includes a `role` of `ADMIN` or `AGENT` (omitting it defaults 
 - When priority changes, new SLA targets begin at the change time; the priority change is recorded in the audit history.
 - User accounts improve access control, but this project is still a portfolio/demo, not production-ready. Before real customer data, add a formal database migration workflow, MFA or an identity provider, password recovery, monitoring/backups, and database-enforced audit immutability.
 - On the first deployment, Render prompts for `ADMIN_EMAIL` and `ADMIN_PASSWORD` (minimum 12 characters). The initial administrator is created once; retain the credentials securely. Later changes to those environment variables do not reset the stored password.
-- Share the deployed `/staff/login` URL with staff. The administrator signs in at `/admin/login`, creates a separate `AGENT` account for each person, and shares each person's sign-in details privately. Never give staff the administrator password.
-- This is an agent-only dashboard: every ticket/API operation requires an active agent session, and only administrators can manage accounts. It is not a customer portal; a customer-facing API must always force public-only messages server-side and enforce customer ownership.
+- Customers can sign up at the deployed root URL and submit support requests. Email ownership is not verified yet; add email verification and abuse controls before using this for sensitive or high-volume customer support.
+- Existing tickets are not automatically attached to newly registered customer accounts by matching email. This protects existing customer data; use staff access to handle older requests until a verified ownership flow is added.
+- Share `/staff/login` with internal support staff. The administrator signs in at `/admin/login` to create their accounts. Never share administrator credentials.
 - Audit entries are append-only through the application routes. Database permissions or triggers are required to make them immutable against direct database access.
