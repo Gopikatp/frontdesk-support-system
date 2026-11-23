@@ -1,6 +1,6 @@
 # Frontdesk
 
-Frontdesk is a support-ticket application built for the iNav Technologies full-stack hiring test. It replaces spreadsheet- and chat-based ticket tracking with a shared inbox, customer conversations, service-level tracking, and an audit history.
+Frontdesk is a support-ticket application . It replaces spreadsheet- and chat-based ticket tracking with a shared inbox, customer conversations, service-level tracking, and an audit history.
 
 ## Features
 
