@@ -11,6 +11,12 @@ services:
           property: connectionString
       - key: APP_TIMEZONE
         value: Asia/Kolkata
+      - key: ADMIN_NAME
+        value: Frontdesk Admin
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
 databases:
   - name: frontdesk-db
     plan: free
