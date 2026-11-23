@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Frontdesk | Support Operations</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">F</span><div><strong>Frontdesk</strong><small>ARVO SYSTEMS · SUPPORT OPERATIONS</small></div></div>
+    <div class="agent"><span class="online"></span><select id="agent"><option>Gopika</option><option>Agent 2</option><option>Agent 3</option><option>Agent 4</option></select></div>
+  </header>
+  <main class="shell">
+    <section class="intro"><div><p class="eyebrow">WORKSPACE / TICKETS</p><h1>Support inbox</h1><p class="muted">Keep every customer issue moving.</p></div><button class="primary" id="newBtn">＋ New ticket</button></section>
+    <section class="stats">
+      <div class="stat"><span>All tickets</span><strong id="total">0</strong></div>
+      <div class="stat"><span>Open / In progress</span><strong id="active">0</strong></div>
+      <div class="stat"><span>Waiting on customer</span><strong id="waiting">0</strong></div>
+      <div class="stat"><span>Overdue</span><strong id="overdue">0</strong></div>
+    </section>
+    <section class="toolbar"><div><h2>All tickets</h2><p class="muted">Claim a ticket to take ownership.</p></div><div class="filters"><input id="searchFilter" type="search" placeholder="Search tickets" aria-label="Search tickets"><select id="statusFilter"><option value="">All statuses</option><option>OPEN</option><option>IN_PROGRESS</option><option>WAITING_CUSTOMER</option><option>RESOLVED</option><option>CLOSED</option></select><select id="priorityFilter"><option value="">All priorities</option><option>URGENT</option><option>MEDIUM</option><option>SMALL</option></select><select id="ownerFilter"><option value="">All owners</option><option value="unassigned">Unassigned</option></select><a class="secondary export" id="exportTickets" href="/api/tickets/export.csv">Export CSV</a></div></section>
+    <div class="ticket-layout"><section id="ticketList" class="ticket-list"></section><section id="detail" class="detail empty"><div class="empty-icon">▤</div><h3>Select a ticket</h3><p>Ticket details and activity will appear here.</p></section></div>
+  </main>
+  <dialog id="createDialog"><form id="createForm"><div class="dialog-head"><div><p class="eyebrow">NEW CUSTOMER ISSUE</p><h2>Create ticket</h2></div><button type="button" class="close" id="closeDialog">×</button></div>
+    <label>Ticket title<input name="title" required minlength="3" placeholder="e.g. Unable to access dashboard"></label>
+    <div class="two"><label>Customer name<input name="customer_name" required></label><label>Customer email<input name="customer_email" type="email" required></label></div>
+    <label>Description<textarea name="description" rows="4" required></textarea></label>
+    <label>Priority<select name="priority"><option value="SMALL">Small</option><option value="MEDIUM">Medium</option><option value="URGENT">Urgent</option></select></label>
+    <button class="primary full" type="submit">Create ticket</button>
+  </form></dialog>
+  <script>window.FRONTDESK_API_BASE = "";</script>
+  <script src="/static/app.js"></script>
+</body></html>
