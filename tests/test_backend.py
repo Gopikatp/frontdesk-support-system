@@ -219,6 +219,57 @@ class BackendTests(unittest.TestCase):
             )
         self.assertEqual(locked.exception.status_code, 429)
 
+    def test_login_enforces_selected_admin_or_staff_portal(self):
+        with self.assertRaises(HTTPException) as staff_on_admin_portal:
+            main.login(
+                main.LoginRequest(
+                    email=self.agent.email,
+                    password="correct horse battery staple",
+                    role="ADMIN",
+                ),
+                self.db,
+            )
+        self.assertEqual(staff_on_admin_portal.exception.status_code, 401)
+
+        agent_login = main.login(
+            main.LoginRequest(
+                email=self.agent.email,
+                password="correct horse battery staple",
+                role="AGENT",
+            ),
+            self.db,
+        )
+        self.assertEqual(agent_login["user"]["role"], "AGENT")
+
+        admin = main.Account(
+            email="admin@example.com",
+            display_name="Administrator",
+            password_hash=main.hash_password("admin password long enough"),
+            role="ADMIN",
+        )
+        self.db.add(admin)
+        self.db.commit()
+        with self.assertRaises(HTTPException) as admin_on_staff_portal:
+            main.login(
+                main.LoginRequest(
+                    email=admin.email,
+                    password="admin password long enough",
+                    role="AGENT",
+                ),
+                self.db,
+            )
+        self.assertEqual(admin_on_staff_portal.exception.status_code, 401)
+
+        admin_login = main.login(
+            main.LoginRequest(
+                email=admin.email,
+                password="admin password long enough",
+                role="ADMIN",
+            ),
+            self.db,
+        )
+        self.assertEqual(admin_login["user"]["role"], "ADMIN")
+
     def test_disabled_account_session_is_rejected(self):
         token = "disabled-session-token"
         self.agent.is_active = False

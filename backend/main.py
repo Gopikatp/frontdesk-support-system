@@ -8,7 +8,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta, time, date, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -293,6 +293,7 @@ class PriorityUpdate(BaseModel):
 class LoginRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     password: str = Field(min_length=1, max_length=128)
+    role: Literal["ADMIN", "AGENT"] = "AGENT"
 
 class AccountCreate(BaseModel):
     email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -336,6 +337,14 @@ async def security_headers(request, call_next):
 def home():
     return FileResponse(FRONTEND_DIR / "index.html")
 
+@app.get("/admin/login")
+def admin_login_page():
+    return FileResponse(FRONTEND_DIR / "index.html")
+
+@app.get("/staff/login")
+def staff_login_page():
+    return FileResponse(FRONTEND_DIR / "index.html")
+
 @app.post("/api/auth/login")
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
     email = normalize_email(payload.email)
@@ -357,7 +366,12 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     password_matches = verify_password(
         payload.password, account.password_hash if account else DUMMY_PASSWORD_HASH
     )
-    if not account or not account.is_active or not password_matches:
+    if (
+        not account
+        or not account.is_active
+        or not password_matches
+        or account.role != payload.role
+    ):
         if not throttle:
             throttle = LoginThrottle(email_hash=email_hash, failed_attempts=0, window_started_at=now)
             db.add(throttle)
