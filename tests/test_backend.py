@@ -1,8 +1,10 @@
 import unittest
+from unittest.mock import patch
 
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -10,6 +12,15 @@ from backend import main
 
 
 class BackendTests(unittest.TestCase):
+    def test_holiday_dates_parse_and_invalid_dates_are_rejected(self):
+        holidays = main.parse_holidays("2026-01-01, 2026-12-25")
+        self.assertEqual(
+            holidays,
+            {main.date(2026, 1, 1), main.date(2026, 12, 25)},
+        )
+        with self.assertRaisesRegex(ValueError, "HOLIDAYS must be"):
+            main.parse_holidays("not-a-date")
+
     def test_database_urls_use_the_installed_postgres_driver(self):
         self.assertEqual(
             main.normalize_database_url("postgres://user:pass@db.example/app"),
@@ -48,6 +59,7 @@ class BackendTests(unittest.TestCase):
             poolclass=StaticPool,
         )
         main.Base.metadata.create_all(bind=self.engine)
+        main.ensure_audit_immutability(self.engine)
         self.db = Session(self.engine, expire_on_commit=False)
         self.agent = main.Account(
             email="agent@example.com",
@@ -89,6 +101,11 @@ class BackendTests(unittest.TestCase):
         friday_evening_utc = main.datetime(2024, 5, 3, 12, 30)
         due = main.add_working_hours(friday_evening_utc, 1.5)
         self.assertEqual(due, main.datetime(2024, 5, 6, 5, 0))
+
+    def test_sla_hours_skip_configured_holidays(self):
+        with patch.object(main, "HOLIDAYS", {main.date(2024, 5, 6)}):
+            due = main.add_working_hours(main.datetime(2024, 5, 3, 12, 30), 1.5)
+        self.assertEqual(due, main.datetime(2024, 5, 7, 5, 0))
 
     def test_ticket_claim_is_exclusive(self):
         ticket = self.create_ticket()
@@ -154,6 +171,25 @@ class BackendTests(unittest.TestCase):
         self.assertNotIn("Internal-only detail", csv_body)
         self.assertIn("'=1+1", csv_body)
 
+    def test_audit_events_cannot_be_updated_or_deleted_in_database(self):
+        ticket = self.create_ticket()
+        event = self.db.scalar(
+            main.select(main.AuditEvent).where(main.AuditEvent.ticket_id == ticket["id"])
+        )
+
+        with self.assertRaises(IntegrityError):
+            with self.engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "UPDATE audit_events SET details = 'changed' WHERE id = ?",
+                    (event.id,),
+                )
+        with self.assertRaises(IntegrityError):
+            with self.engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "DELETE FROM audit_events WHERE id = ?",
+                    (event.id,),
+                )
+
     def test_public_reply_can_pause_ticket_for_customer(self):
         ticket = self.create_ticket()
         main.claim_ticket(ticket["id"], main.ClaimRequest(), self.db, self.agent)
@@ -182,6 +218,30 @@ class BackendTests(unittest.TestCase):
         saved = self.db.get(main.Ticket, ticket["id"])
         self.assertEqual(saved.status, "IN_PROGRESS")
         self.assertIsNone(saved.waiting_since)
+
+    def test_waiting_ticket_auto_closes_after_five_working_days(self):
+        ticket = self.create_ticket()
+        main.claim_ticket(ticket["id"], main.ClaimRequest(), self.db, self.agent)
+        main.update_status(
+            ticket["id"], main.StatusUpdate(status="WAITING_CUSTOMER"), self.db, self.agent
+        )
+        now = main.utcnow()
+        saved = self.db.get(main.Ticket, ticket["id"])
+        saved.waiting_since = now - main.timedelta(days=10)
+        self.db.commit()
+
+        closed_count = main.auto_close_stale_waiting_tickets(self.db, now)
+
+        self.assertEqual(closed_count, 1)
+        self.assertEqual(saved.status, "CLOSED")
+        self.assertIsNone(saved.waiting_since)
+        events = self.db.scalars(
+            main.select(main.AuditEvent).where(
+                main.AuditEvent.ticket_id == ticket["id"],
+                main.AuditEvent.action == "AUTO_CLOSED",
+            )
+        ).all()
+        self.assertEqual(len(events), 1)
 
     def test_priority_change_during_wait_restarts_pause_at_change_time(self):
         ticket = self.create_ticket()
@@ -215,6 +275,20 @@ class BackendTests(unittest.TestCase):
 
         self.assertEqual(error.exception.status_code, 409)
         self.assertEqual(saved.status, "RESOLVED")
+
+    def test_resolved_ticket_can_be_reopened_within_seven_days(self):
+        ticket = self.create_ticket()
+        main.claim_ticket(ticket["id"], main.ClaimRequest(), self.db, self.agent)
+        main.update_status(
+            ticket["id"], main.StatusUpdate(status="RESOLVED"), self.db, self.agent
+        )
+
+        reopened = main.update_status(
+            ticket["id"], main.StatusUpdate(status="IN_PROGRESS"), self.db, self.agent
+        )
+
+        self.assertEqual(reopened["status"], "IN_PROGRESS")
+        self.assertIsNone(self.db.get(main.Ticket, ticket["id"]).resolved_at)
 
     def test_password_hash_and_bearer_session(self):
         stored = main.hash_password("correct horse battery staple")
