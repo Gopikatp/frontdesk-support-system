@@ -1,127 +1,113 @@
 # Frontdesk
 
-Frontdesk is a support-ticket workspace for Arvo Systems. It replaces spreadsheet and chat-based tracking with a central inbox for ticket ownership, customer replies, private notes, SLA deadlines, and an append-only activity history.
-
-## Separate frontend and backend
-
-- `frontend/` contains the standalone HTML, CSS, and JavaScript client.
-- `backend/` contains the FastAPI application, database models, business rules, and API routes.
-- The frontend talks to the backend through `/api`. FastAPI serves the frontend assets in the default deployment so the project runs with one origin and no CORS setup. To deploy them separately, set `window.FRONTDESK_API_BASE` in both `frontend/index.html` and `frontend/customer.html` to the API URL, and set `FRONTEND_ORIGIN` in the backend environment to the frontend origin.
-- `main.py` remains as a compatibility entry point for existing `uvicorn main:app` setups.
+Frontdesk is a support-ticket application built for the iNav Technologies full-stack hiring test. It replaces spreadsheet- and chat-based ticket tracking with a shared inbox, customer conversations, service-level tracking, and an audit history.
 
 ## Features
 
-- Create, search, filter, assign, and track support tickets.
-- Filter inbox tickets by status, priority, and owner; export filtered ticket data to CSV.
-- Atomic ticket claiming so only one agent can claim an unassigned ticket.
-- Public replies and private team notes, kept distinct in the messages API and omitted from CSV exports.
-- Email/password sign-in with salted PBKDF2 password hashes, expiring opaque bearer sessions, logout, and session revocation.
-- Separate `/admin/login` and `/staff/login` portals, with the selected account role checked by the backend.
-- Public customer registration and a customer portal for creating requests, viewing only their own tickets, and sending public replies.
-- Repeated failed sign-ins are throttled; accounts can change passwords and administrators can reset passwords or disable accounts.
-- Admin-managed staff accounts, roles, account disabling, password resets, and a view of registered customer accounts.
-- Server-derived audit actors, so request bodies cannot impersonate agents.
-- Database triggers prevent audit-event updates and deletions in PostgreSQL and SQLite.
-- Security response headers and no-store API responses.
-- Business-hour SLA calculations (Monday-Friday, 09:30-18:30), with a configurable festival-holiday calendar.
-- Pause SLA time while waiting for a customer; optionally put a ticket into that state when sending a public reply.
-- Automatically close waiting tickets after five working days without a customer response.
-- Reopen resolved or closed tickets for up to seven calendar days.
-- Only the assigned agent may update or message a claimed ticket; agents must claim a ticket before working it.
-- Append-only activity event creation for ticket operations.
-- Priority changes record the decision and calculate new targets from the change time.
-- SLA targets: Urgent replies are due in 2 working hours and resolution by that workday's close; Medium replies are due in 4.5 working hours and resolution in 3 working days; Small replies are due in 1 working day and resolution in 5 working days.
-- On startup, active tickets assigned to names with no active account are transferred to the initial active administrator and recorded in the audit history.
-- Customer-created tickets are linked to the signed-in customer account, not just its email. Existing tickets remain staff-only rather than being exposed to someone who registers using a matching email address.
-- Tests cover database URLs, authentication and throttling, account access, ticket ownership and transfer, private-note handling, and waiting status.
+- **Support dashboard:** Search tickets; filter by status, priority, and owner; claim tickets; update status and priority; export ticket data as CSV.
+- **Role-based access:** Customers self-register and see only their own requests. Staff handle tickets. Administrators manage staff and customer accounts.
+- **Private notes:** Staff can add internal notes separately from customer replies. Customer-facing message responses and CSV exports exclude private notes.
+- **Service-level tracking:** Deadlines use Monday–Friday working hours, 09:30–18:30, in the configured timezone, excluding configured holidays. Urgent tickets have a two-working-hour response target and same-working-day resolution target; Medium tickets have a 4.5-working-hour response target and three-working-day resolution target; Small tickets have a one-working-day response target and five-working-day resolution target.
+- **Waiting and reopening:** SLA time pauses while a ticket waits for a customer. Tickets waiting five working days without a customer response are automatically closed. Resolved or closed tickets can be reopened within seven calendar days.
+- **Ownership and history:** Ticket claiming is atomic, so only one agent can claim an unassigned ticket. Ticket actions record the actor, action, details, and timestamp. Database triggers prevent audit-event updates and deletions.
+- **Account security:** Passwords are stored as salted PBKDF2 hashes; sessions expire and can be revoked. Failed sign-ins are throttled.
 
 ## Technology
 
-- Python 3.11+
-- FastAPI and SQLAlchemy
-- PostgreSQL (deployment) or SQLite (tests)
+- Python, FastAPI, SQLAlchemy
+- PostgreSQL for deployment; SQLite is used by the automated tests
 - HTML, CSS, and vanilla JavaScript
 - Docker Compose for local PostgreSQL
 
-## Run locally (Windows PowerShell)
+## Run locally
+
+The following commands are for Windows PowerShell, run from the project root.
 
 1. Create and activate a virtual environment:
+
    ```powershell
    py -m venv .venv
    .\.venv\Scripts\Activate.ps1
    ```
-2. Install dependencies:
+
+2. Install dependencies and start the local PostgreSQL database:
+
    ```powershell
    pip install -r requirements.txt
-   ```
-3. Configure the database and first administrator. For PostgreSQL, start the included service and copy the example environment file:
-   ```powershell
    docker compose up -d db
+   ```
+
+3. Create `.env` from the example and configure the initial administrator:
+
+   ```powershell
    Copy-Item .env.example .env
    ```
-   Set `DATABASE_URL`, `ADMIN_EMAIL`, and a unique `ADMIN_PASSWORD` of at least 12 characters in `.env`. Set `HOLIDAYS` to a comma-separated list of dates (`YYYY-MM-DD`) from Arvo's holiday calendar. The first startup creates the administrator; later startups will not reset its password from environment variables.
-4. Start the app from the repository root:
+
+   Set `ADMIN_EMAIL` and a unique `ADMIN_PASSWORD` of at least 12 characters in `.env`. Keep this file private; it is excluded from Git. The first application startup creates the administrator. Changing these environment values later does not change the password of an existing account.
+
+   Optionally set `HOLIDAYS` to comma-separated dates in `YYYY-MM-DD` format, for example `2026-12-25,2027-01-01`. Leave it blank if there are no dates to exclude. `APP_TIMEZONE` defaults to `Asia/Kolkata`.
+
+4. Start the application:
+
    ```powershell
    uvicorn backend.main:app --reload
    ```
-   Or use the compatibility command `uvicorn main:app --reload`.
-5. Access the portals:
-   - Customers: http://127.0.0.1:8000 — customers can create an account themselves.
-   - Staff: http://127.0.0.1:8000/staff/login — full support dashboard with ticket search, status/priority/owner filters, ticket actions, and CSV export.
-   - Administrator: http://127.0.0.1:8000/admin/login
-   The customer portal links to staff sign-in; staff pages link back to the customer portal. Customer accounts only see their own requests and do not have staff dashboard controls.
-   Only the administrator should create internal staff (`AGENT`) accounts. Customers can self-register; public registration always creates a `CUSTOMER` account and never grants staff access. Do not share administrator credentials.
-6. Open:
-   - App: http://127.0.0.1:8000
-   - API docs: http://127.0.0.1:8000/docs
-   - Health check: http://127.0.0.1:8000/api/health
 
-Run the test suite with:
+   Alternatively, `uvicorn main:app --reload` is supported from the project root.
+
+5. Open the appropriate page:
+
+   | User | Local URL |
+   |---|---|
+   | Customer | <http://127.0.0.1:8000/> |
+   | Staff | <http://127.0.0.1:8000/staff/login> |
+   | Administrator | <http://127.0.0.1:8000/admin/login> |
+   | API documentation | <http://127.0.0.1:8000/docs> |
+   | Health check | <http://127.0.0.1:8000/api/health> |
+
+   Customers can create their own customer accounts. Only an administrator can create internal staff or administrator accounts. Do not share your administrator credentials; create a separate account for each person who needs access.
+
+## Tests
+
+Run the backend test suite from the project root:
+
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-## Deploy
+The tests cover authentication and authorization, customer data isolation, ticket claiming and ownership, private-note visibility, SLA calculations, waiting-ticket closure, reopening, database migration behavior, and audit-event protections.
 
-The repository includes a Render Blueprint in `render.yaml`. To deploy, push the project to a GitHub repository, create a new Blueprint on Render from that repository, and provide `ADMIN_EMAIL` and a unique `ADMIN_PASSWORD` when prompted. Render provisions the web service and PostgreSQL database from the Blueprint. Wait for `/api/health` to pass, then open the service URL and test the customer, staff, and admin routes. Keep the admin password private and do not commit `.env`.
+## Deployment
 
-The application URL is generated by the hosting provider; it is not embedded in this repository. Add the actual live URL to the handoff only after deployment succeeds, and keep the service available for the requested test period.
+The repository includes a Render Blueprint in [`render.yaml`](./render.yaml). To deploy, push the repository to GitHub, create a Blueprint in Render from that repository, and provide `ADMIN_EMAIL` and a unique `ADMIN_PASSWORD` when prompted. The Blueprint describes a web service and PostgreSQL database. After deployment, verify `/api/health` and test the customer, staff, and administrator flows.
 
-## API overview
+The deployment URL is assigned by the hosting provider; this repository does not claim a live URL. Add the URL to your submission only after deployment and browser testing succeed. Free-tier availability, limits, and database retention are controlled by the hosting provider and may change; confirm the current terms and keep the service available for the evaluation period.
 
-- `POST /api/tickets` — create a ticket
-- `GET /api/tickets` — list and filter tickets (`status`, `priority`, `q`, `assigned_agent`, `unassigned`)
-- `GET /api/tickets/export.csv` — export filtered ticket data (never includes messages or private notes)
-- `GET /api/tickets/{id}` — ticket details
-- `POST /api/tickets/{id}/claim` — atomically claim an unassigned ticket
-- `POST /api/tickets/{id}/messages` — add a public reply or private note
-- `GET /api/tickets/{id}/messages?include_private=false` — list public messages by default
-- `POST /api/tickets/{id}/status` — change ticket status
-- `POST /api/tickets/{id}/priority` — change priority
-- `GET /api/tickets/{id}/audit` — activity history
-- `GET /api/health` — health check
-- `POST /api/auth/login` — sign in and create a session
-- `POST /api/auth/register` — create a customer-only account
-- `GET /api/auth/me` — current account
-- `POST /api/auth/logout` — revoke current session
-- `POST /api/auth/password` — change current password and revoke sessions
-- `GET/POST /api/users` — administrator-only account management
-- `PATCH /api/users/{id}` and `POST /api/users/{id}/password` — administrator-only account disable/enable and password reset
+Never commit `.env` or send it to evaluators. Set deployment secrets through the hosting provider’s environment-variable configuration.
 
-The login request includes a `role` of `ADMIN`, `AGENT`, or `CUSTOMER` (omitting it defaults to `AGENT`). The server rejects credentials whose account role does not match. Customers can only access tickets linked to their account ID, and the server always hides private notes and audit logs from them. Account-management routes remain administrator-only. When hosting the frontend separately, configure the static host to serve the customer page at `/` and `/customer/login`, and `index.html` at `/admin/login` and `/staff/login`.
+## Configuration
 
-## Business rules and production limitations
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Database connection string. The example uses the local Docker PostgreSQL service. |
+| `APP_TIMEZONE` | Timezone used for SLA calculations; defaults to `Asia/Kolkata`. |
+| `HOLIDAYS` | Optional comma-separated holiday dates in `YYYY-MM-DD` format. |
+| `ADMIN_NAME` | Display name for the initial administrator. |
+| `ADMIN_EMAIL` | Email address for the initial administrator. |
+| `ADMIN_PASSWORD` | Initial administrator password; at least 12 characters. |
+| `FRONTEND_ORIGIN` | Optional allowed origin when hosting the frontend separately. |
 
-- Working hours are Monday-Friday, 09:30-18:30 in `APP_TIMEZONE` (defaults to `Asia/Kolkata`). Configure company festival dates with `HOLIDAYS` in `.env`.
-- Medium resolution is interpreted as three working days; one working week is five working days.
-- When priority changes, new SLA targets begin at the change time; the priority change is recorded in the audit history.
-- Audit-event rows cannot be updated or deleted through the configured SQLite/PostgreSQL database triggers. A database owner or superuser can still disable/drop triggers; restrict database credentials and access accordingly.
-- This project is a hiring-test/portfolio demo, not production-ready for real customer data. Formal schema migrations, MFA or an identity provider, password recovery, monitoring/backups, and customer email verification are not implemented.
-- On the first deployment, Render prompts for `ADMIN_EMAIL` and `ADMIN_PASSWORD` (minimum 12 characters). The initial administrator is created once; retain the credentials securely. Later changes to those environment variables do not reset the stored password.
-- Customers can sign up at the deployed root URL and submit support requests. Email ownership is not verified yet; add email verification and abuse controls before using this for sensitive or high-volume customer support.
-- Existing tickets are not automatically attached to newly registered customer accounts by matching email. This protects existing customer data; use staff access to handle older requests until a verified ownership flow is added.
-- Share `/staff/login` with internal support staff. The administrator signs in at `/admin/login` to create their accounts. Never share administrator credentials.
+## Important limitations
 
-## Hiring-test handoff note
+- This is a hiring-test and portfolio application, not a production-ready service for sensitive customer data.
+- Customer email addresses are not verified. Email verification, password recovery, MFA, monitoring, backups, and a formal database migration workflow are not implemented.
+- Audit triggers protect records from ordinary database updates and deletions, but a database owner or superuser can disable or remove those triggers. Restrict database access appropriately.
+- Newly registered customers do not automatically gain access to older tickets with a matching email address; this avoids exposing tickets without verified ownership.
 
-Implemented: the agent dashboard, role-based access, ticket claiming, private/public messages, SLA tracking, waiting/auto-close and reopen rules, and an append-only audit history protected by database triggers. Not finished: production hardening (email verification, MFA, password recovery, formal migrations, monitoring, and backups). These were kept out of this time-boxed exercise; do not use the demo with sensitive customer data. Send the live URL, repository URL, this README, and this note to the evaluator through the requested submission channel. Deploy first and include a live URL only after confirming it works.
+## Hiring-test handoff
+
+**Completed:** The customer portal, staff dashboard, administrator account management, ticket ownership, private/public conversations, SLA handling, and activity history are implemented and covered by tests.
+
+**Not completed:** Production hardening such as customer email verification, password recovery, MFA, formal migrations, monitoring, and backups was outside the time-boxed implementation. The application should be treated as a demo and not used for sensitive customer data.
+
+For submission, provide the verified live URL, repository URL, this README, and the short handoff note above. Keep the app available for the requested evaluation period.
