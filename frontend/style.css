@@ -17,6 +17,10 @@
 .auth-success{color:#027a48;background:#ecfdf3;border-radius:8px;padding:10px 12px;font-size:12px}
 .auth-switch{margin:18px 0 0;text-align:center;color:#667085;font-size:12px}
 .text-button{border:0;background:none;color:#155eef;font:inherit;font-weight:700;cursor:pointer}
+.portal-links{display:flex;justify-content:center;gap:12px;flex-wrap:wrap;border-top:1px solid #edf0f5;margin-top:20px;padding-top:16px;font-size:12px;color:#667085}
+.portal-links a{color:#155eef;font-weight:700;text-decoration:none}
+.portal-links a:hover{text-decoration:underline}
+.portal-link{display:inline-flex;align-items:center;text-decoration:none;white-space:nowrap}
 .field-hint{font-weight:400;color:#8490a3}
 .customer-layout{margin-top:24px}
 .customer-layout>.section-title{margin:0 0 12px}

@@ -16,12 +16,16 @@
       <label>Email<input name="email" type="email" autocomplete="username" required maxlength="254"></label>
       <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
       <button class="primary full" type="submit">Sign in</button>
+      <nav class="portal-links" aria-label="Other portals">
+        <a href="/">Customer portal</a>
+        <a href="/admin/login">Administrator sign in</a>
+      </nav>
     </form>
   </section>
   <div id="appScreen" hidden>
   <header class="topbar">
     <div class="brand"><span class="brand-mark">F</span><div><strong>Frontdesk</strong><small>ARVO SYSTEMS · SUPPORT OPERATIONS</small></div></div>
-    <div class="agent"><span class="online"></span><span id="currentUser"></span><button class="secondary" id="changePassword">Change password</button><button class="secondary" id="manageUsers" hidden>Manage accounts</button><button class="secondary" id="logout">Sign out</button></div>
+    <div class="agent"><span class="online"></span><span id="currentUser"></span><a class="secondary portal-link" href="/">Customer portal</a><button class="secondary" id="changePassword">Change password</button><button class="secondary" id="manageUsers" hidden>Manage accounts</button><button class="secondary" id="logout">Sign out</button></div>
   </header>
   <main class="shell">
     <section class="intro"><div><p class="eyebrow">WORKSPACE / TICKETS</p><h1>Support inbox</h1><p class="muted">Keep every customer issue moving.</p></div><button class="primary" id="newBtn">＋ New ticket</button></section>

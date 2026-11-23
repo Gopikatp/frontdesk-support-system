@@ -34,12 +34,16 @@
         </form>
         <p class="auth-switch">Already registered? <button id="showSignIn" class="text-button" type="button">Sign in</button></p>
       </div>
+      <nav class="portal-links" aria-label="Other portals">
+        <span>Frontdesk team?</span>
+        <a href="/staff/login">Staff sign in</a>
+      </nav>
     </div>
   </section>
   <div id="customerApp" hidden>
     <header class="topbar">
       <div class="brand"><span class="brand-mark">F</span><div><strong>Frontdesk</strong><small>ARVO SYSTEMS · CUSTOMER SUPPORT</small></div></div>
-      <div class="agent"><span id="customerName"></span><button class="secondary" id="customerLogout">Sign out</button></div>
+      <div class="agent"><span id="customerName"></span><a class="secondary portal-link" href="/staff/login">Staff workspace</a><button class="secondary" id="customerLogout">Sign out</button></div>
     </header>
     <main class="shell">
       <section class="intro">
