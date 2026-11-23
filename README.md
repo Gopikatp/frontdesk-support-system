@@ -62,9 +62,8 @@ Frontdesk is a support-ticket workspace for Arvo Systems. It replaces spreadshee
    ```
    Or use the compatibility command `uvicorn main:app --reload`.
 5. Sign in:
+   - Staff: http://127.0.0.1:8000 (also available at `/staff/login`)
    - Administrator: http://127.0.0.1:8000/admin/login
-   - Staff: http://127.0.0.1:8000/staff/login
-   - The root URL shows both sign-in choices.
    The initial administrator signs in at the admin URL and creates a separate `AGENT` account for each staff member. Give each person their own staff email and initial password through a private channel; do not share the administrator credentials.
 6. Open:
    - App: http://127.0.0.1:8000
@@ -96,7 +95,7 @@ python -m unittest discover -s tests
 - `GET/POST /api/users` — administrator-only account management
 - `PATCH /api/users/{id}` and `POST /api/users/{id}/password` — administrator-only account disable/enable and password reset
 
-The login request includes a `role` of `ADMIN` or `AGENT` (omitting it defaults to `AGENT`). The server rejects credentials whose account role does not match the selected portal. Account-management routes remain administrator-only regardless of which URL is used. When hosting the frontend separately, configure the static host to serve `index.html` for `/admin/login` and `/staff/login` as well.
+The login request includes a `role` of `ADMIN` or `AGENT` (omitting it defaults to `AGENT`). The server rejects credentials whose account role does not match the selected portal. Account-management routes remain administrator-only regardless of which URL is used. The public root URL opens staff sign-in; administrators use `/admin/login`. When hosting the frontend separately, configure the static host to serve `index.html` for `/admin/login` and `/staff/login` as well.
 
 ## Business rules and production limitations
 
