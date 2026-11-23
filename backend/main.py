@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, String, DateTime, Boolean, ForeignKey, Text, select, update, delete, func
+from sqlalchemy import create_engine, inspect, String, DateTime, Boolean, ForeignKey, Text, select, update, delete, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, Session
 
 def normalize_database_url(url: str) -> str:
@@ -56,6 +56,9 @@ class Ticket(Base):
     priority: Mapped[str] = mapped_column(String(20), default="SMALL")
     status: Mapped[str] = mapped_column(String(30), default="OPEN")
     assigned_agent: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    customer_account_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("accounts.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     first_response_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -268,6 +271,14 @@ def require_admin(account: Account = Depends(get_current_account)) -> Account:
         raise HTTPException(403, "Administrator access required")
     return account
 
+def require_staff(account: Account) -> None:
+    if account.role not in {"ADMIN", "AGENT"}:
+        raise HTTPException(403, "Staff access required")
+
+def require_ticket_access(ticket: Ticket, account: Account) -> None:
+    if account.role == "CUSTOMER" and ticket.customer_account_id != account.id:
+        raise HTTPException(404, "Ticket not found")
+
 class TicketCreate(BaseModel):
     title: str = Field(min_length=3, max_length=180)
     customer_name: str = Field(min_length=1, max_length=120, strip_whitespace=True)
@@ -293,7 +304,12 @@ class PriorityUpdate(BaseModel):
 class LoginRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     password: str = Field(min_length=1, max_length=128)
-    role: Literal["ADMIN", "AGENT"] = "AGENT"
+    role: Literal["ADMIN", "AGENT", "CUSTOMER"] = "AGENT"
+
+class CustomerRegister(BaseModel):
+    email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    display_name: str = Field(min_length=1, max_length=120, strip_whitespace=True)
+    password: str = Field(min_length=12, max_length=128)
 
 class AccountCreate(BaseModel):
     email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -335,7 +351,7 @@ async def security_headers(request, call_next):
 
 @app.get("/")
 def home():
-    return FileResponse(FRONTEND_DIR / "index.html")
+    return FileResponse(FRONTEND_DIR / "customer.html")
 
 @app.get("/admin/login")
 def admin_login_page():
@@ -344,6 +360,34 @@ def admin_login_page():
 @app.get("/staff/login")
 def staff_login_page():
     return FileResponse(FRONTEND_DIR / "index.html")
+
+@app.get("/customer/login")
+def customer_login_page():
+    return FileResponse(FRONTEND_DIR / "customer.html")
+
+@app.post("/api/auth/register", status_code=201)
+def register_customer(payload: CustomerRegister, db: Session = Depends(get_db)):
+    email = normalize_email(payload.email)
+    if db.scalar(select(Account.id).where(Account.email == email)):
+        raise HTTPException(409, "An account with this email already exists. Sign in instead.")
+    display_name = payload.display_name.strip()
+    if not display_name:
+        raise HTTPException(422, "Name cannot be blank")
+    if db.scalar(select(Account.id).where(Account.display_name == display_name)):
+        suffix = f" ({hashlib.sha256(email.encode('utf-8')).hexdigest()[:10]})"
+        display_name = f"{display_name[:120 - len(suffix)]}{suffix}"
+    account = Account(
+        email=email,
+        display_name=display_name,
+        password_hash=hash_password(payload.password),
+        role="CUSTOMER",
+    )
+    db.add(account)
+    db.execute(delete(LoginThrottle).where(
+        LoginThrottle.email_hash == hashlib.sha256(email.encode("utf-8")).hexdigest()
+    ))
+    db.commit()
+    return {"message": "Customer account created. You can now sign in."}
 
 @app.post("/api/auth/login")
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
@@ -442,7 +486,7 @@ def create_account(
 ):
     email = normalize_email(payload.email)
     if payload.role not in {"AGENT", "ADMIN"}:
-        raise HTTPException(400, "Role must be AGENT or ADMIN")
+        raise HTTPException(400, "Administrators can create AGENT or ADMIN accounts only")
     display_name = payload.display_name.strip()
     if not display_name:
         raise HTTPException(422, "Name cannot be blank")
@@ -595,11 +639,21 @@ def create_ticket(
     priority = payload.priority.upper()
     if priority not in PRIORITY_TARGETS:
         raise HTTPException(400, "Priority must be URGENT, MEDIUM or SMALL")
+    if account.role == "CUSTOMER":
+        customer_name = account.display_name
+        customer_email = account.email
+        customer_account_id = account.id
+    else:
+        require_staff(account)
+        customer_name = payload.customer_name
+        customer_email = normalize_email(payload.customer_email)
+        customer_account_id = None
     now = utcnow()
     response_hours, _ = PRIORITY_TARGETS[priority]
     t = Ticket(
-        title=payload.title, customer_name=payload.customer_name,
-        customer_email=payload.customer_email, description=payload.description,
+        title=payload.title, customer_name=customer_name,
+        customer_email=customer_email, description=payload.description,
+        customer_account_id=customer_account_id,
         priority=priority, status="OPEN", created_at=now, updated_at=now,
         first_response_due_at=add_working_hours(now, response_hours),
         resolution_due_at=resolution_deadline(priority, now),
@@ -618,9 +672,11 @@ def list_tickets(
     assigned_agent: Optional[str] = Query(default=None, max_length=120),
     unassigned: bool = False,
     db: Session = Depends(get_db),
-    _account: Account = Depends(get_current_account),
+    account: Account = Depends(get_current_account),
 ):
     stmt = ticket_statement(status, priority, q, assigned_agent, unassigned)
+    if account.role == "CUSTOMER":
+        stmt = stmt.where(Ticket.customer_account_id == account.id)
     return [ticket_dict(t) for t in db.scalars(stmt).all()]
 
 @app.get("/api/tickets/export.csv")
@@ -631,8 +687,9 @@ def export_tickets(
     assigned_agent: Optional[str] = Query(default=None, max_length=120),
     unassigned: bool = False,
     db: Session = Depends(get_db),
-    _account: Account = Depends(get_current_account),
+    account: Account = Depends(get_current_account),
 ):
+    require_staff(account)
     stmt = ticket_statement(status, priority, q, assigned_agent, unassigned)
     return StreamingResponse(
         iter([ticket_csv(db, stmt)]),
@@ -644,11 +701,12 @@ def export_tickets(
 def get_ticket(
     ticket_id: int,
     db: Session = Depends(get_db),
-    _account: Account = Depends(get_current_account),
+    account: Account = Depends(get_current_account),
 ):
     t = db.get(Ticket, ticket_id)
     if not t:
         raise HTTPException(404, "Ticket not found")
+    require_ticket_access(t, account)
     return ticket_dict(t)
 
 @app.post("/api/tickets/{ticket_id}/claim")
@@ -658,6 +716,7 @@ def claim_ticket(
     db: Session = Depends(get_db),
     account: Account = Depends(get_current_account),
 ):
+    require_staff(account)
     # Conditional UPDATE makes claiming atomic: only one agent can win.
     result = db.execute(
         update(Ticket).where(
@@ -686,9 +745,14 @@ def add_message(
     t = db.get(Ticket, ticket_id)
     if not t:
         raise HTTPException(404, "Ticket not found")
+    require_ticket_access(t, account)
     if t.status in ("CLOSED", "RESOLVED"):
         raise HTTPException(409, "Reopen the ticket before adding a message")
-    if t.assigned_agent != account.display_name:
+    is_customer = account.role == "CUSTOMER"
+    if is_customer:
+        if payload.is_private or payload.waiting_for_customer:
+            raise HTTPException(403, "Customers can send public replies only")
+    elif t.assigned_agent != account.display_name:
         raise HTTPException(409, "Claim this ticket before adding messages")
     if payload.waiting_for_customer and payload.is_private:
         raise HTTPException(400, "A private note cannot put a ticket into customer-waiting status")
@@ -696,10 +760,15 @@ def add_message(
     db.add(m)
     now = utcnow()
     t.updated_at = now
-    if not payload.is_private and t.first_response_at is None:
+    if not is_customer and not payload.is_private and t.first_response_at is None:
         t.first_response_at = now
-    audit(db, ticket_id, account.display_name, "PRIVATE_NOTE_ADDED" if payload.is_private else "PUBLIC_REPLY_SENT",
-          "Internal note" if payload.is_private else "Customer-visible reply")
+    action = "PRIVATE_NOTE_ADDED" if payload.is_private else (
+        "CUSTOMER_REPLY_SENT" if is_customer else "PUBLIC_REPLY_SENT"
+    )
+    details = "Internal note" if payload.is_private else (
+        "Customer reply" if is_customer else "Customer-visible reply"
+    )
+    audit(db, ticket_id, account.display_name, action, details)
     if payload.waiting_for_customer and t.status != "WAITING_CUSTOMER":
         old_status = t.status
         t.status = "WAITING_CUSTOMER"
@@ -710,8 +779,8 @@ def add_message(
         audit(db, ticket_id, account.display_name, "WAITING_TIMER_RESET", "Agent requested another customer response")
     elif not payload.is_private and t.status == "WAITING_CUSTOMER":
         resume_sla_after_wait(t, now)
-        t.status = "IN_PROGRESS"
-        audit(db, ticket_id, account.display_name, "STATUS_CHANGED", "WAITING_CUSTOMER -> IN_PROGRESS")
+        t.status = "IN_PROGRESS" if t.assigned_agent else "OPEN"
+        audit(db, ticket_id, account.display_name, "STATUS_CHANGED", f"WAITING_CUSTOMER -> {t.status}")
     db.commit()
     return {"id": m.id, "message": "Saved", "is_private": m.is_private}
 
@@ -720,12 +789,14 @@ def list_messages(
     ticket_id: int,
     include_private: bool = False,
     db: Session = Depends(get_db),
-    _account: Account = Depends(get_current_account),
+    account: Account = Depends(get_current_account),
 ):
-    if not db.get(Ticket, ticket_id):
+    ticket = db.get(Ticket, ticket_id)
+    if not ticket:
         raise HTTPException(404, "Ticket not found")
+    require_ticket_access(ticket, account)
     stmt = select(Message).where(Message.ticket_id == ticket_id).order_by(Message.created_at)
-    if not include_private:
+    if not include_private or account.role == "CUSTOMER":
         stmt = stmt.where(Message.is_private.is_(False))
     return [{"id": m.id, "author": m.author, "body": m.body, "is_private": m.is_private,
              "created_at": m.created_at.isoformat()} for m in db.scalars(stmt).all()]
@@ -740,6 +811,7 @@ def update_status(
     t = db.get(Ticket, ticket_id)
     if not t:
         raise HTTPException(404, "Ticket not found")
+    require_staff(account)
     new_status = payload.status.upper()
     transitions = {
         "OPEN": {"IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED"},
@@ -789,6 +861,7 @@ def update_priority(
     t = db.get(Ticket, ticket_id)
     if not t:
         raise HTTPException(404, "Ticket not found")
+    require_staff(account)
     priority = payload.priority.upper()
     if priority not in PRIORITY_TARGETS:
         raise HTTPException(400, "Invalid priority")
@@ -817,8 +890,9 @@ def update_priority(
 def list_audit(
     ticket_id: int,
     db: Session = Depends(get_db),
-    _account: Account = Depends(get_current_account),
+    account: Account = Depends(get_current_account),
 ):
+    require_staff(account)
     if not db.get(Ticket, ticket_id):
         raise HTTPException(404, "Ticket not found")
     rows = db.scalars(select(AuditEvent).where(AuditEvent.ticket_id == ticket_id).order_by(AuditEvent.created_at)).all()
@@ -830,9 +904,23 @@ def health(db: Session = Depends(get_db)):
     db.execute(select(1))
     return {"status": "ok", "service": "Frontdesk"}
 
+def ensure_customer_ticket_ownership_column(database_engine=engine) -> None:
+    columns = {column["name"] for column in inspect(database_engine).get_columns("tickets")}
+    with database_engine.begin() as connection:
+        if "customer_account_id" not in columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE tickets ADD COLUMN customer_account_id INTEGER REFERENCES accounts (id)"
+            )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_tickets_customer_account_id "
+            "ON tickets (customer_account_id)"
+        )
+
 def migrate_legacy_ticket_owners(db: Session, admin: Account) -> None:
     active_names = set(db.scalars(
-        select(Account.display_name).where(Account.is_active.is_(True))
+        select(Account.display_name).where(
+            Account.is_active.is_(True), Account.role.in_(("ADMIN", "AGENT"))
+        )
     ).all())
     legacy_tickets = db.scalars(select(Ticket).where(
         Ticket.assigned_agent.is_not(None),
@@ -898,6 +986,7 @@ async def auto_close_waiting_tickets():
 @app.on_event("startup")
 async def startup_task():
     Base.metadata.create_all(bind=engine)
+    ensure_customer_ticket_ownership_column()
     ensure_initial_admin()
     app.state.auto_close_task = asyncio.create_task(auto_close_waiting_tickets())
 

@@ -2,7 +2,7 @@ import unittest
 
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -20,6 +20,26 @@ class BackendTests(unittest.TestCase):
             "postgresql+psycopg://user:pass@db.example/app",
         )
         self.assertEqual(main.normalize_database_url("sqlite:///app.db"), "sqlite:///app.db")
+
+    def test_existing_database_gets_customer_ticket_ownership_column(self):
+        legacy_engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        try:
+            with legacy_engine.begin() as connection:
+                connection.exec_driver_sql("CREATE TABLE accounts (id INTEGER PRIMARY KEY)")
+                connection.exec_driver_sql("CREATE TABLE tickets (id INTEGER PRIMARY KEY)")
+
+            main.ensure_customer_ticket_ownership_column(legacy_engine)
+
+            columns = {column["name"] for column in inspect(legacy_engine).get_columns("tickets")}
+            foreign_keys = inspect(legacy_engine).get_foreign_keys("tickets")
+            self.assertIn("customer_account_id", columns)
+            self.assertTrue(any(key["referred_table"] == "accounts" for key in foreign_keys))
+        finally:
+            legacy_engine.dispose()
 
     def setUp(self):
         self.engine = create_engine(
@@ -53,6 +73,17 @@ class BackendTests(unittest.TestCase):
             self.db,
             self.agent,
         )
+
+    def create_customer(self, email="customer@example.com", name="A Customer"):
+        customer = main.Account(
+            email=email,
+            display_name=name,
+            password_hash=main.hash_password("customer password long enough"),
+            role="CUSTOMER",
+        )
+        self.db.add(customer)
+        self.db.commit()
+        return customer
 
     def test_sla_hours_skip_weekend(self):
         friday_evening_utc = main.datetime(2024, 5, 3, 12, 30)
@@ -108,10 +139,10 @@ class BackendTests(unittest.TestCase):
         )
 
         public_messages = main.list_messages(
-            ticket["id"], include_private=False, db=self.db, _account=self.agent
+            ticket["id"], include_private=False, db=self.db, account=self.agent
         )
         all_messages = main.list_messages(
-            ticket["id"], include_private=True, db=self.db, _account=self.agent
+            ticket["id"], include_private=True, db=self.db, account=self.agent
         )
         csv_body = main.ticket_csv(
             self.db,
@@ -202,6 +233,195 @@ class BackendTests(unittest.TestCase):
             self.db,
         )
         self.assertEqual(authenticated.id, self.agent.id)
+
+    def test_public_registration_creates_customer_only_and_customer_can_sign_in(self):
+        response = main.register_customer(
+            main.CustomerRegister(
+                email="New.Customer@example.com",
+                display_name="Agent One",
+                password="customer password long enough",
+            ),
+            self.db,
+        )
+        account = self.db.scalar(
+            main.select(main.Account).where(main.Account.email == "new.customer@example.com")
+        )
+        self.assertEqual(response["message"], "Customer account created. You can now sign in.")
+        self.assertEqual(account.role, "CUSTOMER")
+        self.assertTrue(account.display_name.startswith("Agent One ("))
+        with self.assertRaises(HTTPException) as duplicate_error:
+            main.register_customer(
+                main.CustomerRegister(
+                    email="new.customer@example.com",
+                    display_name="New Customer",
+                    password="customer password long enough",
+                ),
+                self.db,
+            )
+        self.assertEqual(duplicate_error.exception.status_code, 409)
+        signed_in = main.login(
+            main.LoginRequest(
+                email="new.customer@example.com",
+                password="customer password long enough",
+                role="CUSTOMER",
+            ),
+            self.db,
+        )
+        self.assertEqual(signed_in["user"]["role"], "CUSTOMER")
+        with self.assertRaises(HTTPException) as staff_portal_error:
+            main.login(
+                main.LoginRequest(
+                    email="new.customer@example.com",
+                    password="customer password long enough",
+                    role="AGENT",
+                ),
+                self.db,
+            )
+        self.assertEqual(staff_portal_error.exception.status_code, 401)
+        admin = main.Account(
+            email="admin@example.com",
+            display_name="Administrator",
+            password_hash=main.hash_password("admin password long enough"),
+            role="ADMIN",
+        )
+        self.db.add(admin)
+        self.db.commit()
+        managed_accounts = main.list_accounts(self.db, admin)
+        self.assertIn(
+            ("new.customer@example.com", "CUSTOMER"),
+            {(item["email"], item["role"]) for item in managed_accounts},
+        )
+
+    def test_customer_ticket_creation_uses_authenticated_identity(self):
+        customer = self.create_customer()
+        ticket = main.create_ticket(
+            main.TicketCreate(
+                title="Need help with my order",
+                customer_name="Impersonated Customer",
+                customer_email="other@example.com",
+                description="Please help.",
+            ),
+            self.db,
+            customer,
+        )
+        saved = self.db.get(main.Ticket, ticket["id"])
+        self.assertEqual(saved.customer_email, customer.email)
+        self.assertEqual(saved.customer_name, customer.display_name)
+        self.assertEqual(saved.customer_account_id, customer.id)
+
+    def test_customer_only_sees_own_tickets_and_public_messages(self):
+        customer = self.create_customer()
+        own_ticket = main.create_ticket(
+            main.TicketCreate(
+                title="My private support request",
+                customer_name=customer.display_name,
+                customer_email=customer.email,
+                description="Please help me.",
+            ),
+            self.db,
+            customer,
+        )
+        main.claim_ticket(own_ticket["id"], main.ClaimRequest(), self.db, self.agent)
+        main.add_message(
+            own_ticket["id"],
+            main.MessageCreate(body="Internal-only detail", is_private=True),
+            self.db,
+            self.agent,
+        )
+        other_customer = self.create_customer("other@example.com", "Other Customer")
+        other_ticket = main.create_ticket(
+            main.TicketCreate(
+                title="Another customer's ticket",
+                customer_name=other_customer.display_name,
+                customer_email=other_customer.email,
+                description="Private request.",
+            ),
+            self.db,
+            other_customer,
+        )
+
+        visible_tickets = main.list_tickets(
+            status=None, priority=None, q=None, assigned_agent=None,
+            unassigned=False, db=self.db, account=customer,
+        )
+        visible_messages = main.list_messages(
+            own_ticket["id"], include_private=True, db=self.db, account=customer
+        )
+
+        self.assertEqual([ticket["id"] for ticket in visible_tickets], [own_ticket["id"]])
+        self.assertEqual(visible_messages, [])
+        with self.assertRaises(HTTPException) as error:
+            main.get_ticket(other_ticket["id"], self.db, customer)
+        self.assertEqual(error.exception.status_code, 404)
+        with self.assertRaises(HTTPException) as message_error:
+            main.list_messages(
+                other_ticket["id"], include_private=False, db=self.db, account=customer
+            )
+        self.assertEqual(message_error.exception.status_code, 404)
+        with self.assertRaises(HTTPException) as audit_error:
+            main.list_audit(own_ticket["id"], db=self.db, account=customer)
+        self.assertEqual(audit_error.exception.status_code, 403)
+        with self.assertRaises(HTTPException) as export_error:
+            main.export_tickets(
+                status=None, priority=None, q=None, assigned_agent=None,
+                unassigned=False, db=self.db, account=customer,
+            )
+        self.assertEqual(export_error.exception.status_code, 403)
+
+    def test_customer_signup_does_not_claim_older_tickets_with_same_email(self):
+        older_ticket = self.create_ticket()
+        customer = self.create_customer()
+
+        visible_tickets = main.list_tickets(
+            status=None, priority=None, q=None, assigned_agent=None,
+            unassigned=False, db=self.db, account=customer,
+        )
+
+        self.assertEqual(visible_tickets, [])
+        self.assertIsNone(self.db.get(main.Ticket, older_ticket["id"]).customer_account_id)
+
+    def test_customer_can_reply_but_cannot_claim_or_change_ticket(self):
+        customer = self.create_customer()
+        ticket = main.create_ticket(
+            main.TicketCreate(
+                title="Customer reply test",
+                customer_name=customer.display_name,
+                customer_email=customer.email,
+                description="Please contact me.",
+            ),
+            self.db,
+            customer,
+        )
+        main.claim_ticket(ticket["id"], main.ClaimRequest(), self.db, self.agent)
+        main.update_status(
+            ticket["id"], main.StatusUpdate(status="WAITING_CUSTOMER"), self.db, self.agent
+        )
+
+        main.add_message(
+            ticket["id"], main.MessageCreate(body="Here is the requested information."),
+            self.db, customer,
+        )
+        saved = self.db.get(main.Ticket, ticket["id"])
+        self.assertEqual(saved.status, "IN_PROGRESS")
+        self.assertIsNone(saved.waiting_since)
+        self.assertIsNone(saved.first_response_at)
+
+        with self.assertRaises(HTTPException) as private_error:
+            main.add_message(
+                ticket["id"],
+                main.MessageCreate(body="Attempted internal note", is_private=True),
+                self.db,
+                customer,
+            )
+        self.assertEqual(private_error.exception.status_code, 403)
+        with self.assertRaises(HTTPException) as status_error:
+            main.update_status(
+                ticket["id"], main.StatusUpdate(status="RESOLVED"), self.db, customer
+            )
+        self.assertEqual(status_error.exception.status_code, 403)
+        with self.assertRaises(HTTPException) as claim_error:
+            main.claim_ticket(ticket["id"], main.ClaimRequest(), self.db, customer)
+        self.assertEqual(claim_error.exception.status_code, 403)
 
     def test_login_throttles_repeated_bad_passwords(self):
         for _ in range(main.LOGIN_FAILURE_LIMIT):
