@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: frontdesk
+    runtime: docker
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: frontdesk-db
+          property: connectionString
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+databases:
+  - name: frontdesk-db
+    plan: free
+    databaseName: frontdesk
+    user: frontdesk
