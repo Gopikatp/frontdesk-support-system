@@ -2,8 +2,10 @@ const $ = (id) => document.getElementById(id);
 const API_BASE = (window.FRONTDESK_API_BASE || "").replace(/\/$/, "");
 let tickets = [];
 let selectedId = null;
+let authToken = sessionStorage.getItem("frontdesk_token");
+let currentUser = null;
+let refreshTimer = null;
 
-const agent = () => $("agent").value;
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[char]));
@@ -16,13 +18,48 @@ const formatDate = (value) => {
 };
 
 async function api(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...options.headers };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
   });
   const data = await response.json().catch(() => ({ detail: "Unexpected server response" }));
+  if (response.status === 401 && authToken && path !== "/api/auth/login") {
+    expireSession();
+  }
   if (!response.ok) throw new Error(data.detail || "Request failed");
   return data;
+}
+
+function showLogin(message = "") {
+  $("loginScreen").hidden = false;
+  $("appScreen").hidden = true;
+  $("loginError").textContent = message;
+  $("loginError").hidden = !message;
+}
+
+function expireSession(message = "Your session expired. Please sign in again.") {
+  if (refreshTimer) {
+    window.clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
+  sessionStorage.removeItem("frontdesk_token");
+  authToken = null;
+  currentUser = null;
+  selectedId = null;
+  showLogin(message);
+}
+
+function showApp(user) {
+  currentUser = user;
+  $("currentUser").textContent = `${user.display_name} (${pretty(user.role)})`;
+  $("manageUsers").hidden = user.role !== "ADMIN";
+  $("loginScreen").hidden = true;
+  $("appScreen").hidden = false;
+  if (!refreshTimer) refreshTimer = window.setInterval(() => {
+    if (authToken) load().catch(showError);
+  }, 60000);
 }
 
 function filterTickets() {
@@ -56,7 +93,7 @@ function updateExportLink() {
   const owner = $("ownerFilter").value;
   if (owner === "unassigned") params.set("unassigned", "true");
   else if (owner) params.set("assigned_agent", owner);
-  $("exportTickets").href = `${API_BASE}/api/tickets/export.csv${params.size ? `?${params}` : ""}`;
+  $("exportTickets").dataset.url = `${API_BASE}/api/tickets/export.csv${params.size ? `?${params}` : ""}`;
 }
 
 function renderList() {
@@ -104,6 +141,7 @@ async function openTicket(id) {
     api(`/api/tickets/${id}/messages?include_private=true`),
     api(`/api/tickets/${id}/audit`),
   ]);
+  const ownsTicket = ticket.assigned_agent === currentUser.display_name;
   $("detail").className = "detail";
   $("detail").innerHTML = `
     <div class="detail-head">
@@ -123,14 +161,15 @@ async function openTicket(id) {
     </div>
     <div class="actions">
       ${!ticket.assigned_agent ? '<button id="claim">Take this ticket</button>' : ""}
-      ${ticket.status !== "WAITING_CUSTOMER" ? '<button id="wait">Waiting on customer</button>' : ""}
-      ${ticket.status !== "IN_PROGRESS" ? '<button id="progress">In progress</button>' : ""}
-      ${!["RESOLVED", "CLOSED"].includes(ticket.status) ? '<button id="resolve">Mark resolved</button>' : ""}
-      ${["RESOLVED", "CLOSED"].includes(ticket.status) ? '<button id="reopen">Reopen</button>' : ""}
-      <select id="priorityChange" aria-label="Change priority">
+      ${ticket.assigned_agent && !ownsTicket ? `<span class="detail-meta">Owned by ${escapeHtml(ticket.assigned_agent)}; only the owner can update it.</span>` : ""}
+      ${ownsTicket && ticket.status !== "WAITING_CUSTOMER" ? '<button id="wait">Waiting on customer</button>' : ""}
+      ${ownsTicket && ticket.status !== "IN_PROGRESS" ? '<button id="progress">In progress</button>' : ""}
+      ${ownsTicket && !["RESOLVED", "CLOSED"].includes(ticket.status) ? '<button id="resolve">Mark resolved</button>' : ""}
+      ${ownsTicket && ["RESOLVED", "CLOSED"].includes(ticket.status) ? '<button id="reopen">Reopen</button>' : ""}
+      ${ownsTicket && !["RESOLVED", "CLOSED"].includes(ticket.status) ? `<select id="priorityChange" aria-label="Change priority">
         <option value="">Change priority</option>
         <option value="URGENT">Urgent</option><option value="MEDIUM">Medium</option><option value="SMALL">Small</option>
-      </select>
+      </select>` : ""}
     </div>
     <h3 class="section-title">Conversation & internal notes</h3>
     <div>${messages.map((message) => `
@@ -138,7 +177,7 @@ async function openTicket(id) {
         <small>${message.is_private ? "PRIVATE NOTE" : "PUBLIC REPLY"} · ${escapeHtml(message.author)} · ${formatDate(message.created_at)}</small>
         ${escapeHtml(message.body)}
       </div>`).join("") || '<p class="detail-meta">No messages yet.</p>'}</div>
-    ${["RESOLVED", "CLOSED"].includes(ticket.status) ? "" : `
+    ${!ownsTicket || ["RESOLVED", "CLOSED"].includes(ticket.status) ? "" : `
       <div class="compose"><textarea id="messageBody" rows="3" maxlength="10000" placeholder="Write a customer reply or internal note..."></textarea>
         <div class="compose-row">
           <label><input id="privateNote" type="checkbox"> Private team note</label>
@@ -146,7 +185,7 @@ async function openTicket(id) {
           <button class="primary" id="sendMessage">Send message</button>
         </div>
       </div>`}
-    <div class="audit"><h3>Immutable activity history</h3>
+    <div class="audit"><h3>Activity history</h3>
       ${audit.map((entry) => `<div class="audit-item"><strong>${escapeHtml(pretty(entry.action))}</strong>
         · ${escapeHtml(entry.actor)} · ${formatDate(entry.created_at)}<br>${escapeHtml(entry.details)}</div>`).join("")}
     </div>`;
@@ -159,19 +198,18 @@ async function openTicket(id) {
       showError(error);
     }
   };
-  if ($("claim")) $("claim").onclick = () => action(`/api/tickets/${id}/claim`, { agent: agent() });
-  if ($("wait")) $("wait").onclick = () => action(`/api/tickets/${id}/status`, { status: "WAITING_CUSTOMER", actor: agent() });
-  if ($("progress")) $("progress").onclick = () => action(`/api/tickets/${id}/status`, { status: "IN_PROGRESS", actor: agent() });
-  if ($("resolve")) $("resolve").onclick = () => action(`/api/tickets/${id}/status`, { status: "RESOLVED", actor: agent() });
-  if ($("reopen")) $("reopen").onclick = () => action(`/api/tickets/${id}/status`, { status: "IN_PROGRESS", actor: agent() });
-  $("priorityChange").onchange = (event) => {
-    if (event.target.value) action(`/api/tickets/${id}/priority`, { priority: event.target.value, actor: agent() });
+  if ($("claim")) $("claim").onclick = () => action(`/api/tickets/${id}/claim`, {});
+  if ($("wait")) $("wait").onclick = () => action(`/api/tickets/${id}/status`, { status: "WAITING_CUSTOMER" });
+  if ($("progress")) $("progress").onclick = () => action(`/api/tickets/${id}/status`, { status: "IN_PROGRESS" });
+  if ($("resolve")) $("resolve").onclick = () => action(`/api/tickets/${id}/status`, { status: "RESOLVED" });
+  if ($("reopen")) $("reopen").onclick = () => action(`/api/tickets/${id}/status`, { status: "IN_PROGRESS" });
+  if ($("priorityChange")) $("priorityChange").onchange = (event) => {
+    if (event.target.value) action(`/api/tickets/${id}/priority`, { priority: event.target.value });
   };
   if ($("sendMessage")) $("sendMessage").onclick = () => {
     const body = $("messageBody").value.trim();
     if (!body) return;
     action(`/api/tickets/${id}/messages`, {
-      author: agent(),
       body,
       is_private: $("privateNote").checked,
       waiting_for_customer: $("waitForCustomer").checked,
@@ -184,7 +222,6 @@ $("closeDialog").onclick = () => $("createDialog").close();
 $("createForm").onsubmit = async (event) => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.target));
-  data.actor = agent();
   try {
     const ticket = await api("/api/tickets", { method: "POST", body: JSON.stringify(data) });
     $("createDialog").close();
@@ -196,8 +233,157 @@ $("createForm").onsubmit = async (event) => {
   }
 };
 
+async function loadAccounts() {
+  const users = await api("/api/users");
+  $("userList").innerHTML = users.map((user) => `
+    <div class="user-row">
+      <div><strong>${escapeHtml(user.display_name)}</strong><small>${escapeHtml(user.email)} · ${pretty(user.role)}</small></div>
+      <span class="pill ${user.is_active ? "small" : "urgent"}">${user.is_active ? "Active" : "Disabled"}</span>
+      ${user.id === currentUser.id ? "" : `<button class="secondary" data-reset-user="${user.id}">Reset password</button><button class="secondary" data-user-id="${user.id}" data-active="${user.is_active}">${user.is_active ? "Disable" : "Enable"}</button>`}
+    </div>`).join("");
+  document.querySelectorAll("[data-user-id]").forEach((button) => {
+    button.onclick = async () => {
+      try {
+        await api(`/api/users/${button.dataset.userId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ is_active: button.dataset.active !== "true" }),
+        });
+        await loadAccounts();
+      } catch (error) {
+        showError(error);
+      }
+    };
+  });
+  document.querySelectorAll("[data-reset-user]").forEach((button) => {
+    button.onclick = () => {
+      $("resetPasswordForm").elements.namedItem("account_id").value = button.dataset.resetUser;
+      $("resetPasswordDialog").showModal();
+    };
+  });
+}
+
+$("manageUsers").onclick = async () => {
+  try {
+    await loadAccounts();
+    $("usersDialog").showModal();
+  } catch (error) {
+    showError(error);
+  }
+};
+$("closeUsersDialog").onclick = () => $("usersDialog").close();
+$("closeResetPasswordDialog").onclick = () => $("resetPasswordDialog").close();
+$("resetPasswordForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const form = Object.fromEntries(new FormData(event.target));
+  try {
+    await api(`/api/users/${form.account_id}/password`, {
+      method: "POST",
+      body: JSON.stringify({ password: form.password }),
+    });
+    event.target.reset();
+    $("resetPasswordDialog").close();
+    window.alert("Password reset. The user must sign in again.");
+  } catch (error) {
+    showError(error);
+  }
+};
+$("userForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const data = Object.fromEntries(new FormData(event.target));
+  try {
+    await api("/api/users", { method: "POST", body: JSON.stringify(data) });
+    event.target.reset();
+    await loadAccounts();
+  } catch (error) {
+    showError(error);
+  }
+};
+
+$("changePassword").onclick = () => $("passwordDialog").showModal();
+$("closePasswordDialog").onclick = () => $("passwordDialog").close();
+$("passwordForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const form = Object.fromEntries(new FormData(event.target));
+  try {
+    await api("/api/auth/password", { method: "POST", body: JSON.stringify(form) });
+    event.target.reset();
+    $("passwordDialog").close();
+    expireSession("Password changed. Sign in again with your new password.");
+  } catch (error) {
+    showError(error);
+  }
+};
+
+async function downloadExport() {
+  try {
+    const response = await fetch($("exportTickets").dataset.url, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (response.status === 401) expireSession();
+    if (!response.ok) throw new Error("Could not export tickets");
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "frontdesk-tickets.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    showError(error);
+  }
+}
+$("exportTickets").onclick = downloadExport;
+
+$("loginForm").onsubmit = async (event) => {
+  event.preventDefault();
+  $("loginError").hidden = true;
+  const form = Object.fromEntries(new FormData(event.target));
+  try {
+    const result = await api("/api/auth/login", { method: "POST", body: JSON.stringify(form) });
+    authToken = result.access_token;
+    sessionStorage.setItem("frontdesk_token", authToken);
+    event.target.reset();
+    showApp(result.user);
+    await load();
+  } catch (error) {
+    $("loginError").textContent = error.message;
+    $("loginError").hidden = false;
+  }
+};
+
+$("logout").onclick = async () => {
+  try {
+    await api("/api/auth/logout", { method: "POST" });
+  } catch (error) {
+    if (authToken) showError(error);
+  } finally {
+    if (refreshTimer) {
+      window.clearInterval(refreshTimer);
+      refreshTimer = null;
+    }
+    sessionStorage.removeItem("frontdesk_token");
+    authToken = null;
+    currentUser = null;
+    $("appScreen").hidden = true;
+    showLogin();
+  }
+};
+
 ["searchFilter", "statusFilter", "priorityFilter", "ownerFilter"].forEach((id) => {
   $(id).addEventListener(id === "searchFilter" ? "input" : "change", renderList);
 });
-load().catch((error) => window.alert(`Could not load Frontdesk: ${error.message}`));
-window.setInterval(() => load().catch(showError), 60000);
+
+async function startApp() {
+  if (!authToken) {
+    showLogin();
+    return;
+  }
+  try {
+    const user = await api("/api/auth/me");
+    showApp(user);
+    await load();
+  } catch (error) {
+    if (authToken) showLogin(error.message);
+  }
+}
+
+startApp();

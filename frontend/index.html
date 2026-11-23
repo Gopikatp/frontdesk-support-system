@@ -7,9 +7,21 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+  <section id="loginScreen" class="auth-screen">
+    <form id="loginForm" class="auth-card">
+      <div class="brand"><span class="brand-mark">F</span><div><strong>Frontdesk</strong><small>ARVO SYSTEMS · SUPPORT OPERATIONS</small></div></div>
+      <h1>Staff sign in</h1>
+      <p class="muted">Use your Frontdesk account to access the support inbox.</p>
+      <p id="loginError" class="auth-error" role="alert" hidden></p>
+      <label>Email<input name="email" type="email" autocomplete="username" required maxlength="254"></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="128"></label>
+      <button class="primary full" type="submit">Sign in</button>
+    </form>
+  </section>
+  <div id="appScreen" hidden>
   <header class="topbar">
     <div class="brand"><span class="brand-mark">F</span><div><strong>Frontdesk</strong><small>ARVO SYSTEMS · SUPPORT OPERATIONS</small></div></div>
-    <div class="agent"><span class="online"></span><select id="agent"><option>Gopika</option><option>Agent 2</option><option>Agent 3</option><option>Agent 4</option></select></div>
+    <div class="agent"><span class="online"></span><span id="currentUser"></span><button class="secondary" id="changePassword">Change password</button><button class="secondary" id="manageUsers" hidden>Manage accounts</button><button class="secondary" id="logout">Sign out</button></div>
   </header>
   <main class="shell">
     <section class="intro"><div><p class="eyebrow">WORKSPACE / TICKETS</p><h1>Support inbox</h1><p class="muted">Keep every customer issue moving.</p></div><button class="primary" id="newBtn">＋ New ticket</button></section>
@@ -19,7 +31,7 @@
       <div class="stat"><span>Waiting on customer</span><strong id="waiting">0</strong></div>
       <div class="stat"><span>Overdue</span><strong id="overdue">0</strong></div>
     </section>
-    <section class="toolbar"><div><h2>All tickets</h2><p class="muted">Claim a ticket to take ownership.</p></div><div class="filters"><input id="searchFilter" type="search" placeholder="Search tickets" aria-label="Search tickets"><select id="statusFilter"><option value="">All statuses</option><option>OPEN</option><option>IN_PROGRESS</option><option>WAITING_CUSTOMER</option><option>RESOLVED</option><option>CLOSED</option></select><select id="priorityFilter"><option value="">All priorities</option><option>URGENT</option><option>MEDIUM</option><option>SMALL</option></select><select id="ownerFilter"><option value="">All owners</option><option value="unassigned">Unassigned</option></select><a class="secondary export" id="exportTickets" href="/api/tickets/export.csv">Export CSV</a></div></section>
+    <section class="toolbar"><div><h2>All tickets</h2><p class="muted">Claim a ticket to take ownership.</p></div><div class="filters"><input id="searchFilter" type="search" placeholder="Search tickets" aria-label="Search tickets"><select id="statusFilter"><option value="">All statuses</option><option>OPEN</option><option>IN_PROGRESS</option><option>WAITING_CUSTOMER</option><option>RESOLVED</option><option>CLOSED</option></select><select id="priorityFilter"><option value="">All priorities</option><option>URGENT</option><option>MEDIUM</option><option>SMALL</option></select><select id="ownerFilter"><option value="">All owners</option><option value="unassigned">Unassigned</option></select><button class="secondary export" id="exportTickets" type="button">Export CSV</button></div></section>
     <div class="ticket-layout"><section id="ticketList" class="ticket-list"></section><section id="detail" class="detail empty"><div class="empty-icon">▤</div><h3>Select a ticket</h3><p>Ticket details and activity will appear here.</p></section></div>
   </main>
   <dialog id="createDialog"><form id="createForm"><div class="dialog-head"><div><p class="eyebrow">NEW CUSTOMER ISSUE</p><h2>Create ticket</h2></div><button type="button" class="close" id="closeDialog">×</button></div>
@@ -29,6 +41,26 @@
     <label>Priority<select name="priority"><option value="SMALL">Small</option><option value="MEDIUM">Medium</option><option value="URGENT">Urgent</option></select></label>
     <button class="primary full" type="submit">Create ticket</button>
   </form></dialog>
+  <dialog id="usersDialog"><form id="userForm"><div class="dialog-head"><div><p class="eyebrow">ADMINISTRATION</p><h2>Manage accounts</h2></div><button type="button" class="close" id="closeUsersDialog">×</button></div>
+    <div id="userList" class="user-list"></div>
+    <h3 class="section-title">Create account</h3>
+    <label>Name<input name="display_name" required maxlength="120"></label>
+    <label>Email<input name="email" type="email" required maxlength="254"></label>
+    <label>Initial password<input name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" required></label>
+    <label>Role<select name="role"><option value="AGENT">Agent</option><option value="ADMIN">Administrator</option></select></label>
+    <button class="primary full" type="submit">Create account</button>
+  </form></dialog>
+  <dialog id="passwordDialog"><form id="passwordForm"><div class="dialog-head"><div><p class="eyebrow">ACCOUNT SECURITY</p><h2>Change password</h2></div><button type="button" class="close" id="closePasswordDialog">×</button></div>
+    <label>Current password<input name="current_password" type="password" autocomplete="current-password" required maxlength="128"></label>
+    <label>New password<input name="new_password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
+    <button class="primary full" type="submit">Update password</button>
+  </form></dialog>
+  <dialog id="resetPasswordDialog"><form id="resetPasswordForm"><div class="dialog-head"><div><p class="eyebrow">ADMINISTRATION</p><h2>Reset agent password</h2></div><button type="button" class="close" id="closeResetPasswordDialog">×</button></div>
+    <input name="account_id" type="hidden">
+    <label>New password<input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="128"></label>
+    <button class="primary full" type="submit">Reset password</button>
+  </form></dialog>
+  </div>
   <script>window.FRONTDESK_API_BASE = "";</script>
   <script src="/static/app.js"></script>
 </body></html>

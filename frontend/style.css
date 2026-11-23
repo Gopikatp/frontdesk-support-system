@@ -8,3 +8,19 @@
 .compose-row input{width:auto;margin:0 6px 0 0}
 @media(max-width:800px){.filters{flex-wrap:wrap}.filters input{flex:1;min-width:140px}}
 @media(max-width:480px){.filters input{width:100%;flex-basis:100%}.compose-row{align-items:flex-start}}
+.auth-screen{min-height:100vh;display:grid;place-items:center;padding:24px}
+.auth-card{width:min(420px,100%);background:#fff;border:1px solid #e8edf4;border-radius:16px;padding:30px;box-shadow:0 12px 40px #17203312}
+.auth-card h1{font:800 25px Manrope;margin:28px 0 0}
+.auth-card .muted{line-height:1.55}
+.auth-card label{display:block;font-size:12px;font-weight:700;color:#475467;margin:16px 0}
+.auth-error{color:#b42318;background:#fef3f2;border-radius:8px;padding:10px 12px;font-size:12px}
+.agent{flex-wrap:wrap;justify-content:flex-end}
+.user-list{max-height:230px;overflow:auto;border:1px solid #edf0f5;border-radius:9px;margin:12px 0 20px}
+.user-row{display:flex;align-items:center;gap:8px;padding:10px;border-bottom:1px solid #edf0f5}
+.user-row:last-child{border-bottom:0}
+.user-row div{flex:1;min-width:0}
+.user-row strong,.user-row small{display:block;overflow-wrap:anywhere}
+.user-row small{color:#7b8798;font-size:10px;margin-top:3px}
+.user-row button{font-size:10px;padding:6px 8px}
+#appScreen[hidden],#loginScreen[hidden]{display:none}
+@media(max-width:480px){.auth-card{padding:22px}.agent{gap:7px}.agent #currentUser{font-size:11px}}
